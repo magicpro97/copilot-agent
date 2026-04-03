@@ -1,11 +1,13 @@
 import { execSync, spawn } from 'node:child_process';
-import { getLatestSessionId, getSessionPremium } from './session.js';
+import { resolve } from 'node:path';
+import { getLatestSessionId, getSessionPremium, getSessionCwd } from './session.js';
 import { log, warn, fail } from './logger.js';
 
 export interface CopilotProcess {
   pid: number;
   command: string;
   sessionId?: string;
+  cwd?: string;
 }
 
 export interface CopilotResult {
@@ -52,11 +54,20 @@ export function findCopilotProcesses(): CopilotProcess[] {
           if (pid === myPid || pid === parentPid) continue;
           const cmd = match[2];
           const sidMatch = cmd.match(/resume[= ]+([a-f0-9-]{36})/);
-          results.push({
-            pid,
-            command: cmd,
-            sessionId: sidMatch?.[1],
-          });
+          // Try to get cwd of the process
+          let cwd: string | undefined;
+          try {
+            cwd = execSync(`lsof -p ${pid} -Fn 2>/dev/null | grep '^n/' | head -1`, {
+              encoding: 'utf-8',
+              stdio: ['pipe', 'pipe', 'pipe'],
+            }).trim().slice(1) || undefined;
+          } catch { /* best effort */ }
+          // Fallback: get cwd from session if we know the session
+          const sid = sidMatch?.[1];
+          if (!cwd && sid) {
+            cwd = getSessionCwd(sid) || undefined;
+          }
+          results.push({ pid, command: cmd, sessionId: sid, cwd });
         }
       }
     }
@@ -75,28 +86,34 @@ export function findPidForSession(sid: string): number | null {
 }
 
 /**
- * SAFETY: Wait until no other copilot processes are running.
- * Prevents race conditions from concurrent copilot instances.
+ * SAFETY: Wait until no copilot is running in the SAME directory.
+ * Copilot in different directories/worktrees can run in parallel.
  */
-export async function waitForAllCopilotToFinish(
+export async function waitForCopilotInDir(
+  dir: string,
   timeoutMs = 14_400_000,
   pollMs = 10_000,
 ): Promise<void> {
+  const targetDir = resolve(dir);
   const start = Date.now();
   let warned = false;
   while (Date.now() - start < timeoutMs) {
     const procs = findCopilotProcesses();
-    if (procs.length === 0) return;
+    const conflicting = procs.filter(p => {
+      if (!p.cwd) return false;
+      return resolve(p.cwd) === targetDir;
+    });
+    if (conflicting.length === 0) return;
     if (!warned) {
-      warn(`Waiting for ${procs.length} copilot process(es) to finish before starting...`);
-      for (const p of procs) {
+      warn(`Waiting for copilot in ${targetDir} to finish...`);
+      for (const p of conflicting) {
         log(`  PID ${p.pid}: ${p.command.slice(0, 80)}`);
       }
       warned = true;
     }
     await sleep(pollMs);
   }
-  warn('Timeout waiting for copilot processes to finish');
+  warn('Timeout waiting for copilot to finish in directory');
 }
 
 /**
@@ -128,8 +145,9 @@ export async function runCopilot(
   args: string[],
   options?: { cwd?: string },
 ): Promise<CopilotResult> {
-  // SAFETY: Wait for all existing copilot processes to finish first
-  await waitForAllCopilotToFinish();
+  // SAFETY: Wait for copilot in same directory only (parallel in different dirs is OK)
+  const dir = options?.cwd ?? process.cwd();
+  await waitForCopilotInDir(dir);
 
   return new Promise((resolve) => {
     const child = spawn('copilot', args, {

@@ -9,7 +9,7 @@ const program = new Command();
 
 program
   .name('copilot-agent')
-  .version('0.3.0')
+  .version('0.4.0')
   .description('Autonomous GitHub Copilot CLI agent — auto-resume, task discovery, overnight runs');
 
 registerStatusCommand(program);
