@@ -4,7 +4,7 @@ import { detectProjectType, detectProjectName } from "../lib/detect.js";
 import { getTasksForProject } from "../lib/tasks.js";
 import { runCopilotTask, assertCopilot } from "../lib/process.js";
 import { withLock } from "../lib/lock.js";
-import { gitBranch, gitStatus, gitStash, gitCheckout, gitIsRepo } from "../lib/git.js";
+import { gitCurrentBranch, gitStatus, gitStash, gitCheckout, isGitRepo } from "../lib/git.js";
 import { log, ok, warn, fail, notify } from "../lib/logger.js";
 
 export interface RunOptions {
@@ -40,7 +40,7 @@ export async function runCommand(
     return;
   }
 
-  const originalBranch = gitIsRepo(dir) ? gitBranch(dir) : null;
+  const originalBranch = isGitRepo(dir) ? gitCurrentBranch(dir) : null;
   let completed = 0;
   let premiumTotal = 0;
 
@@ -50,7 +50,7 @@ export async function runCommand(
     log(`${"═".repeat(60)}`);
 
     // Create a feature branch for safety
-    if (originalBranch && gitIsRepo(dir)) {
+    if (originalBranch && isGitRepo(dir)) {
       const branch = `copilot-agent/${task.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
       try {
         if (gitStatus(dir)) gitStash(dir);
@@ -72,7 +72,7 @@ export async function runCommand(
     completed++;
     ok(`${task.title} — exit ${result.exitCode}, premium: ${result.premium}`);
 
-    if (originalBranch && gitIsRepo(dir)) {
+    if (originalBranch && isGitRepo(dir)) {
       try {
         gitCheckout(dir, originalBranch);
       } catch {

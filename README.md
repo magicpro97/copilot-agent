@@ -9,6 +9,8 @@ Autonomous GitHub Copilot CLI agent — auto-resume sessions, discover tasks, ru
 - **`run`** — Auto-discover and fix issues in any project
 - **`overnight`** — Run tasks continuously until a deadline (e.g. 07:00)
 - **`research`** — Research improvements, dependencies, architecture
+- **`daemon`** — Background watchdog that auto-resumes interrupted sessions
+- **`multi`** — Multi-project orchestrator (register projects, run health/research on all)
 
 ## Install
 
@@ -77,6 +79,33 @@ copilot-agent research
 
 # Research a specific topic
 copilot-agent research "migrate from Room to SQLDelight"
+```
+
+### Background daemon
+
+```bash
+# Start watchdog (monitors & auto-resumes sessions)
+copilot-agent daemon start --resume
+
+# Check status / view logs / stop
+copilot-agent daemon status
+copilot-agent daemon logs
+copilot-agent daemon stop
+```
+
+### Multi-project
+
+```bash
+# Register projects
+copilot-agent multi add ~/project-a
+copilot-agent multi add ~/project-b
+copilot-agent multi list
+
+# Run health check on all projects
+copilot-agent multi health
+
+# Run research on all projects
+copilot-agent multi research --dry-run
 ```
 
 ## How it works
