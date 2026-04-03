@@ -3,90 +3,161 @@ import {
   readdirSync,
   readFileSync,
   statSync,
-} from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-import { parse as parseYaml } from "yaml";
-import type { SessionInfo } from "../types.js";
+} from 'node:fs';
+import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 
-const SESSION_DIR = join(homedir(), ".copilot", "session-state");
+export interface Session {
+  id: string;
+  dir: string;
+  mtime: number;
+  lastEvent: string;
+  premiumRequests: number;
+  summary: string;
+  cwd: string;
+  complete: boolean;
+}
+
+const SESSION_DIR = join(homedir(), '.copilot', 'session-state');
 
 export function getSessionDir(): string {
   return SESSION_DIR;
 }
 
 export function validateSession(sid: string): boolean {
-  const events = join(SESSION_DIR, sid, "events.jsonl");
-  return existsSync(events) && statSync(events).size > 0;
+  const events = join(SESSION_DIR, sid, 'events.jsonl');
+  try {
+    return existsSync(events) && statSync(events).size > 0;
+  } catch {
+    return false;
+  }
 }
 
-export function listSessions(limit = 20): SessionInfo[] {
+export function listSessions(limit = 20): Session[] {
   if (!existsSync(SESSION_DIR)) return [];
-  return readdirSync(SESSION_DIR)
-    .filter((d) => existsSync(join(SESSION_DIR, d, "events.jsonl")))
-    .sort((a, b) => {
-      const ma = statSync(join(SESSION_DIR, a)).mtimeMs;
-      const mb = statSync(join(SESSION_DIR, b)).mtimeMs;
-      return mb - ma;
-    })
-    .slice(0, limit)
-    .map((id) => ({ id, ...readWorkspace(id) }));
+
+  const entries = readdirSync(SESSION_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory());
+
+  const dirs: { id: string; dir: string; mtime: number }[] = [];
+  for (const entry of entries) {
+    const dirPath = join(SESSION_DIR, entry.name);
+    if (!existsSync(join(dirPath, 'events.jsonl'))) continue;
+    try {
+      const stat = statSync(dirPath);
+      dirs.push({ id: entry.name, dir: dirPath, mtime: stat.mtimeMs });
+    } catch { /* skip */ }
+  }
+
+  dirs.sort((a, b) => b.mtime - a.mtime);
+
+  return dirs.slice(0, limit).map(s => ({
+    id: s.id,
+    dir: s.dir,
+    mtime: s.mtime,
+    lastEvent: getLastEvent(s.id),
+    premiumRequests: getSessionPremium(s.id),
+    summary: getSessionSummary(s.id),
+    cwd: getSessionCwd(s.id),
+    complete: hasTaskComplete(s.id),
+  }));
 }
 
 export function getLatestSessionId(): string | null {
-  const sessions = listSessions(1);
-  return sessions[0]?.id ?? null;
+  if (!existsSync(SESSION_DIR)) return null;
+
+  const entries = readdirSync(SESSION_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory());
+
+  let latest: { id: string; mtime: number } | null = null;
+  for (const entry of entries) {
+    try {
+      const stat = statSync(join(SESSION_DIR, entry.name));
+      if (!latest || stat.mtimeMs > latest.mtime) {
+        latest = { id: entry.name, mtime: stat.mtimeMs };
+      }
+    } catch { /* skip */ }
+  }
+  return latest?.id ?? null;
 }
 
 export function hasTaskComplete(sid: string): boolean {
   if (!validateSession(sid)) return false;
-  const content = readFileSync(join(SESSION_DIR, sid, "events.jsonl"), "utf-8");
-  return content.includes('"session.task_complete"');
+  try {
+    const content = readFileSync(join(SESSION_DIR, sid, 'events.jsonl'), 'utf-8');
+    return content.includes('"session.task_complete"');
+  } catch {
+    return false;
+  }
 }
 
 export function getLastEvent(sid: string): string {
-  if (!validateSession(sid)) return "invalid";
+  if (!validateSession(sid)) return 'invalid';
   try {
-    const lines = readFileSync(join(SESSION_DIR, sid, "events.jsonl"), "utf-8")
+    const lines = readFileSync(join(SESSION_DIR, sid, 'events.jsonl'), 'utf-8')
       .trimEnd()
-      .split("\n");
+      .split('\n');
     const last = JSON.parse(lines[lines.length - 1]);
-    return last.type ?? "unknown";
+    return last.type ?? 'unknown';
   } catch {
-    return "corrupted";
+    return 'corrupted';
   }
 }
 
 export function getSessionPremium(sid: string): number {
   if (!validateSession(sid)) return 0;
   try {
-    const content = readFileSync(
-      join(SESSION_DIR, sid, "events.jsonl"),
-      "utf-8",
-    );
-    const shutdownLines = content
-      .split("\n")
-      .filter((l) => l.includes('"session.shutdown"'));
-    if (shutdownLines.length === 0) return 0;
-    const last = JSON.parse(shutdownLines[shutdownLines.length - 1]);
-    return last.data?.totalPremiumRequests ?? 0;
+    const content = readFileSync(join(SESSION_DIR, sid, 'events.jsonl'), 'utf-8');
+    const lines = content.trimEnd().split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const event = JSON.parse(lines[i]);
+        if (event.type === 'session.shutdown' && event.data?.totalPremiumRequests != null) {
+          return event.data.totalPremiumRequests;
+        }
+      } catch { /* skip malformed line */ }
+    }
+    return 0;
   } catch {
     return 0;
   }
 }
 
+function parseSimpleYaml(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of content.split('\n')) {
+    const idx = line.indexOf(': ');
+    if (idx === -1) continue;
+    const key = line.substring(0, idx).trim();
+    const value = line.substring(idx + 2).trim();
+    if (key) result[key] = value;
+  }
+  return result;
+}
+
+function readWorkspace(sid: string): Record<string, string> {
+  const wsPath = join(SESSION_DIR, sid, 'workspace.yaml');
+  if (!existsSync(wsPath)) return {};
+  try {
+    return parseSimpleYaml(readFileSync(wsPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
 export function getSessionSummary(sid: string): string {
-  return readWorkspace(sid).summary ?? "";
+  return readWorkspace(sid).summary ?? '';
 }
 
 export function getSessionCwd(sid: string): string {
-  return readWorkspace(sid).cwd ?? "";
+  return readWorkspace(sid).cwd ?? '';
 }
 
 export function findSessionForProject(projectPath: string): string | null {
+  const resolved = resolve(projectPath);
   const sessions = listSessions(50);
   for (const s of sessions) {
-    if (s.cwd === projectPath) return s.id;
+    if (s.cwd && resolve(s.cwd) === resolved) return s.id;
   }
   return null;
 }
@@ -94,26 +165,7 @@ export function findSessionForProject(projectPath: string): string | null {
 export function findLatestIncomplete(): string | null {
   const sessions = listSessions(50);
   for (const s of sessions) {
-    if (!hasTaskComplete(s.id)) return s.id;
+    if (!s.complete) return s.id;
   }
   return null;
-}
-
-function readWorkspace(sid: string): Partial<SessionInfo> {
-  const wsPath = join(SESSION_DIR, sid, "workspace.yaml");
-  if (!existsSync(wsPath)) return {};
-  try {
-    const content = readFileSync(wsPath, "utf-8");
-    const parsed = parseYaml(content);
-    return {
-      cwd: parsed?.cwd,
-      gitRoot: parsed?.git_root,
-      branch: parsed?.branch,
-      summary: parsed?.summary,
-      createdAt: parsed?.created_at,
-      updatedAt: parsed?.updated_at,
-    };
-  } catch {
-    return {};
-  }
 }

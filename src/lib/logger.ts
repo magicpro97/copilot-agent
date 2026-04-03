@@ -1,23 +1,22 @@
-import chalk from "chalk";
-import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { execSync } from "node:child_process";
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { execSync } from 'node:child_process';
+import { RED, GREEN, YELLOW, CYAN, DIM, RESET } from './colors.js';
 
 let logFilePath: string | null = null;
-
-function ts(): string {
-  return new Date().toISOString().replace("T", " ").slice(0, 19);
-}
 
 const ANSI_RE =
   /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
 
-function emit(level: string, msg: string): void {
-  const line = `${chalk.blue(`[${ts()}]`)} [${level}] ${msg}`;
-  console.log(line);
-  if (logFilePath) {
-    appendFileSync(logFilePath, line.replace(ANSI_RE, "") + "\n");
-  }
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, '');
+}
+
+function writeToFile(msg: string): void {
+  if (!logFilePath) return;
+  try {
+    appendFileSync(logFilePath, stripAnsi(msg) + '\n');
+  } catch { /* ignore file write errors */ }
 }
 
 export function setLogFile(path: string): void {
@@ -25,22 +24,56 @@ export function setLogFile(path: string): void {
   logFilePath = path;
 }
 
-export const log = (msg: string) => emit("INFO", msg);
-export const warn = (msg: string) => emit("WARN", chalk.yellow(`⚠️  ${msg}`));
-export const ok = (msg: string) => emit("OK", chalk.green(`✅ ${msg}`));
-export const fail = (msg: string) => emit("ERROR", chalk.red(`❌ ${msg}`));
+export function log(msg: string): void {
+  console.log(msg);
+  writeToFile(msg);
+}
 
-export function notify(message: string, title = "copilot-agent"): void {
+export function warn(msg: string): void {
+  const out = `${YELLOW}⚠ ${msg}${RESET}`;
+  console.log(out);
+  writeToFile(`⚠ ${msg}`);
+}
+
+export function ok(msg: string): void {
+  const out = `${GREEN}✔ ${msg}${RESET}`;
+  console.log(out);
+  writeToFile(`✔ ${msg}`);
+}
+
+export function fail(msg: string): void {
+  const out = `${RED}✖ ${msg}${RESET}`;
+  console.error(out);
+  writeToFile(`✖ ${msg}`);
+}
+
+export function info(msg: string): void {
+  const out = `${CYAN}ℹ ${msg}${RESET}`;
+  console.log(out);
+  writeToFile(`ℹ ${msg}`);
+}
+
+export function dim(msg: string): void {
+  const out = `${DIM}${msg}${RESET}`;
+  console.log(out);
+  writeToFile(msg);
+}
+
+export function notify(message: string, title = 'copilot-agent'): void {
   try {
-    if (process.platform === "darwin") {
+    if (process.platform === 'darwin') {
       execSync(
-        `osascript -e 'display notification "${message}" with title "${title}" sound name "Glass"'`,
-        { stdio: "ignore" },
+        `osascript -e 'display notification "${message.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"'`,
+        { stdio: 'ignore' },
       );
     } else {
-      execSync(`notify-send "${title}" "${message}"`, { stdio: "ignore" });
+      try {
+        execSync('which notify-send', { stdio: 'pipe' });
+        execSync(
+          `notify-send "${title}" "${message.replace(/"/g, '\\"')}"`,
+          { stdio: 'ignore' },
+        );
+      } catch { /* notify-send not available */ }
     }
-  } catch {
-    /* best-effort */
-  }
+  } catch { /* notification not available */ }
 }

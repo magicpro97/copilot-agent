@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
-import { detectProjectType, getProjectName } from "../lib/detect.js";
+import { detectProjectType, detectProjectName } from "../lib/detect.js";
 import { getTasksForProject } from "../lib/tasks.js";
 import { runCopilotTask, assertCopilot } from "../lib/process.js";
 import { withLock } from "../lib/lock.js";
@@ -19,8 +19,8 @@ export async function runCommand(
 ): Promise<void> {
   assertCopilot();
 
-  const projectType = await detectProjectType(dir);
-  const name = getProjectName(dir);
+  const projectType = detectProjectType(dir);
+  const name = detectProjectName(dir);
   log(`Project: ${chalk.cyan(name)} (${projectType})`);
 
   const tasks = getTasksForProject(projectType).slice(0, opts.maxTasks);

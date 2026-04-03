@@ -1,48 +1,73 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-import lockfile from "proper-lockfile";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
-const LOCK_DIR = join(homedir(), ".copilot", "locks");
+const LOCK_BASE = join(homedir(), '.copilot', 'locks');
 
-function lockPath(name: string): string {
-  const p = join(LOCK_DIR, `${name}.lock`);
-  if (!existsSync(LOCK_DIR)) {
-    mkdirSync(LOCK_DIR, { recursive: true });
+function lockDir(name: string): string {
+  return join(LOCK_BASE, `${name}.lock`);
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
-  if (!existsSync(p)) writeFileSync(p, "");
-  return p;
 }
 
-export async function acquireLock(
-  name: string,
-  opts?: { retries?: number; stale?: number },
-): Promise<() => Promise<void>> {
-  const p = lockPath(name);
-  return lockfile.lock(p, {
-    retries: {
-      retries: opts?.retries ?? 10,
-      minTimeout: 1000,
-      maxTimeout: 3000,
-    },
-    stale: opts?.stale ?? 30_000,
-  });
+export function acquireLock(name: string, timeoutMs = 30_000): boolean {
+  mkdirSync(LOCK_BASE, { recursive: true });
+  const dir = lockDir(name);
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      mkdirSync(dir);
+      // Lock acquired — write metadata
+      writeFileSync(join(dir, 'pid'), String(process.pid));
+      writeFileSync(join(dir, 'acquired'), new Date().toISOString());
+      return true;
+    } catch {
+      // Lock dir exists — check if holder is still alive
+      try {
+        const holderPid = parseInt(readFileSync(join(dir, 'pid'), 'utf-8').trim(), 10);
+        if (!isPidAlive(holderPid)) {
+          // Stale lock — break it
+          rmSync(dir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        // Can't read pid file — try breaking
+        rmSync(dir, { recursive: true, force: true });
+        continue;
+      }
+      // Holder is alive — wait and retry
+      const waitMs = Math.min(500, deadline - Date.now());
+      if (waitMs > 0) {
+        const start = Date.now();
+        while (Date.now() - start < waitMs) { /* spin wait */ }
+      }
+    }
+  }
+  return false;
 }
 
-export async function withLock<T>(
-  name: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const release = await acquireLock(name);
+export function releaseLock(name: string): void {
+  const dir = lockDir(name);
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch { /* already released */ }
+}
+
+export async function withLock<T>(name: string, fn: () => T | Promise<T>): Promise<T> {
+  if (!acquireLock(name)) {
+    throw new Error(`Failed to acquire lock: ${name}`);
+  }
   try {
     return await fn();
   } finally {
-    await release();
+    releaseLock(name);
   }
-}
-
-export function isLocked(name: string): boolean {
-  const p = join(LOCK_DIR, `${name}.lock`);
-  if (!existsSync(p)) return false;
-  return lockfile.checkSync(p);
 }

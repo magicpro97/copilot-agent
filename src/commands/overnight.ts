@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
-import { detectProjectType, getProjectName } from "../lib/detect.js";
+import { detectProjectType, detectProjectName } from "../lib/detect.js";
 import { getTasksForProject } from "../lib/tasks.js";
 import { runCopilotTask, assertCopilot } from "../lib/process.js";
 import { withLock } from "../lib/lock.js";
@@ -31,8 +31,8 @@ export async function overnightCommand(
   setLogFile(logPath);
 
   const deadline = parseDeadline(opts.until);
-  const name = getProjectName(dir);
-  const projectType = await detectProjectType(dir);
+  const name = detectProjectName(dir);
+  const projectType = detectProjectType(dir);
 
   log(`Overnight runner for ${chalk.cyan(name)} (${projectType})`);
   log(`Deadline: ${opts.until} (${msToHuman(deadline - Date.now())} from now)`);

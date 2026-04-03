@@ -1,4 +1,4 @@
-import type { ProjectType } from "../types.js";
+import type { ProjectType } from "./detect.js";
 
 interface TaskPrompt {
   title: string;
