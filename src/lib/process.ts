@@ -1,6 +1,6 @@
 import { execSync, spawn } from 'node:child_process';
 import { getLatestSessionId, getSessionPremium } from './session.js';
-import { fail } from './logger.js';
+import { log, warn, fail } from './logger.js';
 
 export interface CopilotProcess {
   pid: number;
@@ -34,6 +34,8 @@ export function findCopilotProcesses(): CopilotProcess[] {
   try {
     const output = execSync('ps -eo pid,command', { encoding: 'utf-8' });
     const results: CopilotProcess[] = [];
+    const myPid = process.pid;
+    const parentPid = process.ppid;
     for (const line of output.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -45,10 +47,13 @@ export function findCopilotProcesses(): CopilotProcess[] {
       ) {
         const match = trimmed.match(/^(\d+)\s+(.+)$/);
         if (match) {
+          const pid = parseInt(match[1], 10);
+          // Exclude our own process tree
+          if (pid === myPid || pid === parentPid) continue;
           const cmd = match[2];
           const sidMatch = cmd.match(/resume[= ]+([a-f0-9-]{36})/);
           results.push({
-            pid: parseInt(match[1], 10),
+            pid,
             command: cmd,
             sessionId: sidMatch?.[1],
           });
@@ -69,6 +74,43 @@ export function findPidForSession(sid: string): number | null {
   return matching[0]?.pid ?? null;
 }
 
+/**
+ * SAFETY: Wait until no other copilot processes are running.
+ * Prevents race conditions from concurrent copilot instances.
+ */
+export async function waitForAllCopilotToFinish(
+  timeoutMs = 14_400_000,
+  pollMs = 10_000,
+): Promise<void> {
+  const start = Date.now();
+  let warned = false;
+  while (Date.now() - start < timeoutMs) {
+    const procs = findCopilotProcesses();
+    if (procs.length === 0) return;
+    if (!warned) {
+      warn(`Waiting for ${procs.length} copilot process(es) to finish before starting...`);
+      for (const p of procs) {
+        log(`  PID ${p.pid}: ${p.command.slice(0, 80)}`);
+      }
+      warned = true;
+    }
+    await sleep(pollMs);
+  }
+  warn('Timeout waiting for copilot processes to finish');
+}
+
+/**
+ * SAFETY: Check if a session already has a running copilot process.
+ * If so, refuse to spawn another one to prevent corruption.
+ */
+export function assertSessionNotRunning(sid: string): void {
+  const pid = findPidForSession(sid);
+  if (pid) {
+    fail(`Session ${sid.slice(0, 8)}… already has copilot running (PID ${pid}). Cannot resume — would corrupt the session.`);
+    process.exit(1);
+  }
+}
+
 export async function waitForExit(pid: number, timeoutMs = 14_400_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -82,10 +124,13 @@ export async function waitForExit(pid: number, timeoutMs = 14_400_000): Promise<
   return false; // timeout
 }
 
-export function runCopilot(
+export async function runCopilot(
   args: string[],
   options?: { cwd?: string },
 ): Promise<CopilotResult> {
+  // SAFETY: Wait for all existing copilot processes to finish first
+  await waitForAllCopilotToFinish();
+
   return new Promise((resolve) => {
     const child = spawn('copilot', args, {
       cwd: options?.cwd,
@@ -116,6 +161,9 @@ export function runCopilotResume(
   message?: string,
   cwd?: string,
 ): Promise<CopilotResult> {
+  // SAFETY: Refuse if session already running
+  assertSessionNotRunning(sid);
+
   const args = [
     `--resume=${sid}`,
     '--autopilot',
