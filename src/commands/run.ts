@@ -3,7 +3,7 @@ import { detectProjectType, detectProjectName, detectMainBranch } from '../lib/d
 import { getTasksForProject } from '../lib/tasks.js';
 import { runCopilotTask, assertCopilot } from '../lib/process.js';
 import { withLock } from '../lib/lock.js';
-import { isGitRepo, gitCurrentBranch, gitStatus, gitStash, gitCheckout, gitCreateBranch, gitCountCommits } from '../lib/git.js';
+import { isGitRepo, gitCurrentBranch, gitStatus, gitStash, gitCheckout, gitCreateBranch, gitCountCommits, createWorktree, removeWorktree } from '../lib/git.js';
 import { log, ok, warn, fail, info, notify } from '../lib/logger.js';
 import { BOLD, CYAN, DIM, GREEN, RESET, YELLOW } from '../lib/colors.js';
 
@@ -15,6 +15,7 @@ export function registerRunCommand(program: Command): void {
     .option('-t, --max-tasks <n>', 'Max number of tasks to run', '5')
     .option('-p, --max-premium <n>', 'Max total premium requests', '50')
     .option('--dry-run', 'Show tasks without executing')
+    .option('--worktree', 'Use git worktree for parallel execution (default: wait for idle)')
     .action(async (dir: string | undefined, opts) => {
       try {
         await runCommand(dir ?? process.cwd(), {
@@ -22,6 +23,7 @@ export function registerRunCommand(program: Command): void {
           maxTasks: parseInt(opts.maxTasks, 10),
           maxPremium: parseInt(opts.maxPremium, 10),
           dryRun: opts.dryRun ?? false,
+          useWorktree: opts.worktree ?? false,
         });
       } catch (err) {
         fail(`Run error: ${err instanceof Error ? err.message : err}`);
@@ -35,6 +37,7 @@ interface RunOptions {
   maxTasks: number;
   maxPremium: number;
   dryRun: boolean;
+  useWorktree: boolean;
 }
 
 async function runCommand(dir: string, opts: RunOptions): Promise<void> {
@@ -92,16 +95,39 @@ async function runCommand(dir: string, opts: RunOptions): Promise<void> {
 
     info(`Running: ${task.title}…`);
 
+    let taskDir = dir;
+    let worktreeCreated = false;
+
+    if (opts.useWorktree && isGitRepo(dir)) {
+      try {
+        taskDir = createWorktree(dir, branchName, mainBranch ?? undefined);
+        worktreeCreated = true;
+        info(`Created worktree: ${taskDir}`);
+      } catch (err) {
+        warn(`Worktree creation failed, falling back to main dir: ${err}`);
+        taskDir = dir;
+      }
+    }
+
     const result = await withLock('copilot-run', () =>
-      runCopilotTask(task.prompt, opts.steps, dir),
+      runCopilotTask(task.prompt, opts.steps, taskDir, opts.useWorktree),
     );
 
-    const commits = mainBranch ? gitCountCommits(dir, mainBranch, 'HEAD') : 0;
+    const commitRef = worktreeCreated ? taskDir : dir;
+    const commits = mainBranch ? gitCountCommits(commitRef, mainBranch, 'HEAD') : 0;
     premiumTotal += result.premium;
     completed++;
     ok(`${task.title} — ${commits} commit(s), ${result.premium} premium`);
 
-    if (originalBranch && isGitRepo(dir)) {
+    if (worktreeCreated) {
+      try {
+        removeWorktree(dir, taskDir);
+      } catch (err) {
+        warn(`Worktree cleanup failed: ${err}`);
+      }
+    }
+
+    if (!worktreeCreated && originalBranch && isGitRepo(dir)) {
       gitCheckout(dir, mainBranch ?? originalBranch);
     }
   }

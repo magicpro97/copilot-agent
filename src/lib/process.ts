@@ -143,11 +143,17 @@ export async function waitForExit(pid: number, timeoutMs = 14_400_000): Promise<
 
 export async function runCopilot(
   args: string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; useWorktree?: boolean },
 ): Promise<CopilotResult> {
-  // SAFETY: Wait for copilot in same directory only (parallel in different dirs is OK)
   const dir = options?.cwd ?? process.cwd();
-  await waitForCopilotInDir(dir);
+
+  if (options?.useWorktree) {
+    // Worktree mode: create separate worktree, no waiting needed
+    // (caller is responsible for creating worktree and passing its path)
+  } else {
+    // Default: wait for copilot in same directory to finish
+    await waitForCopilotInDir(dir);
+  }
 
   return new Promise((resolve) => {
     const child = spawn('copilot', args, {
@@ -198,6 +204,7 @@ export function runCopilotTask(
   prompt: string,
   steps: number,
   cwd?: string,
+  useWorktree?: boolean,
 ): Promise<CopilotResult> {
   return runCopilot([
     '-p', prompt,
@@ -205,7 +212,7 @@ export function runCopilotTask(
     '--allow-all',
     '--max-autopilot-continues', String(steps),
     '--no-ask-user',
-  ], { cwd });
+  ], { cwd, useWorktree });
 }
 
 function sleep(ms: number): Promise<void> {

@@ -19,6 +19,7 @@ export function registerOvernightCommand(program: Command): void {
     .option('-c, --cooldown <n>', 'Seconds between tasks', '15')
     .option('-p, --max-premium <n>', 'Max premium requests budget', '300')
     .option('--dry-run', 'Show plan without executing')
+    .option('--worktree', 'Use git worktree for parallel execution (default: wait for idle)')
     .action(async (dir: string | undefined, opts) => {
       try {
         await overnightCommand(dir ?? process.cwd(), {
@@ -27,6 +28,7 @@ export function registerOvernightCommand(program: Command): void {
           cooldown: parseInt(opts.cooldown, 10),
           maxPremium: parseInt(opts.maxPremium, 10),
           dryRun: opts.dryRun ?? false,
+          useWorktree: opts.worktree ?? false,
         });
       } catch (err) {
         fail(`Overnight error: ${err instanceof Error ? err.message : err}`);
@@ -41,6 +43,7 @@ interface OvernightOptions {
   cooldown: number;
   maxPremium: number;
   dryRun: boolean;
+  useWorktree: boolean;
 }
 
 function isPastDeadline(untilHour: number): boolean {
@@ -126,12 +129,27 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
 
     info(`Running: ${task.title}…`);
 
+    let taskDir = dir;
+    let worktreeCreated = false;
+
+    if (opts.useWorktree && isGitRepo(dir)) {
+      try {
+        taskDir = createWorktree(dir, branchName, mainBranch ?? undefined);
+        worktreeCreated = true;
+        info(`Created worktree: ${taskDir}`);
+      } catch (err) {
+        warn(`Worktree creation failed, falling back to main dir: ${err}`);
+        taskDir = dir;
+      }
+    }
+
     try {
       const result = await withLock('copilot-overnight', () =>
-        runCopilotTask(task.prompt, opts.steps, dir),
+        runCopilotTask(task.prompt, opts.steps, taskDir, opts.useWorktree),
       );
 
-      const commits = mainBranch ? gitCountCommits(dir, mainBranch, 'HEAD') : 0;
+      const commitRef = worktreeCreated ? taskDir : dir;
+      const commits = mainBranch ? gitCountCommits(commitRef, mainBranch, 'HEAD') : 0;
       totalPremium += result.premium;
       totalCommits += commits;
 
@@ -144,7 +162,17 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
       fail(`Task failed: ${err}`);
     }
 
-    if (mainBranch && isGitRepo(dir)) {
+    // Cleanup worktree if we created one
+    if (worktreeCreated) {
+      try {
+        removeWorktree(dir, taskDir);
+        info(`Removed worktree: ${taskDir}`);
+      } catch (err) {
+        warn(`Worktree cleanup failed: ${err}`);
+      }
+    }
+
+    if (!worktreeCreated && mainBranch && isGitRepo(dir)) {
       gitCheckout(dir, mainBranch);
     }
 
