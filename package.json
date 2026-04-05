@@ -1,15 +1,32 @@
 {
   "name": "copilot-agent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Autonomous GitHub Copilot CLI agent — auto-resume, task discovery, overnight runs",
   "author": "magicpro97",
   "license": "MIT",
-  "keywords": ["copilot", "github", "agent", "autopilot", "cli", "automation", "ai"],
-  "repository": { "type": "git", "url": "https://github.com/magicpro97/copilot-agent" },
-  "bin": { "copilot-agent": "./dist/index.js" },
-  "files": ["dist"],
+  "keywords": [
+    "copilot",
+    "github",
+    "agent",
+    "autopilot",
+    "cli",
+    "automation",
+    "ai"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/magicpro97/copilot-agent"
+  },
+  "bin": {
+    "copilot-agent": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -18,18 +35,20 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.12",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "execa": "^9.5.2",
     "find-up": "^7.0.0",
+    "hono": "^4.12.10",
     "ora": "^8.2.0",
     "proper-lockfile": "^4.1.2",
     "ps-list": "^9.0.0",
     "yaml": "^2.7.1"
   },
   "devDependencies": {
-    "@types/proper-lockfile": "^4.1.4",
     "@types/node": "^22.15.2",
+    "@types/proper-lockfile": "^4.1.4",
     "tsup": "^8.4.0",
     "typescript": "^5.8.3"
   }
