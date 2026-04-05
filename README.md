@@ -12,8 +12,11 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`overnight`** | Run tasks continuously until a deadline (e.g. 07:00) |
 | **`research`** | Architecture, security, and performance analysis |
 | **`report`** | Session activity report — tools, commits, files, tokens |
-| **`dashboard`** | Real-time TUI dashboard (pure terminal) |
+| **`dashboard`** | htop-style TUI dashboard with blessed (scrollable, keyboard nav) |
 | **`web`** | Web dashboard with live updates (Hono + htmx + SSE) |
+| **`config`** | Persistent configuration defaults (global + per-project) |
+| **`proxy`** | Manage copilot-api proxy for Claude Code via Copilot |
+| **`diff`** | Show git changes made by an agent session |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -43,7 +46,6 @@ copilot-agent status --active
 
 # Filter by agent
 copilot-agent status --agent claude
-copilot-agent status --agent copilot
 ```
 
 ### Watch & auto-resume
@@ -83,46 +85,59 @@ copilot-agent overnight ~/my-project
 
 # Run with Claude Code
 copilot-agent overnight --agent claude --until 07 --max-premium 200
-
-# Use worktree for parallel tasks
-copilot-agent overnight --worktree
 ```
 
-### Session report
+### Session report & diff
 
 ```bash
-# Latest session
+# Latest session report
 copilot-agent report
 
-# Specific session
-copilot-agent report abc12345-...
+# Show git changes from latest session
+copilot-agent diff
 
-# Multiple recent sessions as JSON
-copilot-agent report -l 5 --json
-
-# Filter by project directory
-copilot-agent report --project ~/my-project
-```
-
-### Research
-
-```bash
-# Analyze current project
-copilot-agent research
-
-# With Claude Code
-copilot-agent research --agent claude
+# Show changes from specific session with diffstat
+copilot-agent diff abc12345-... --stat
 ```
 
 ### Dashboards
 
 ```bash
-# Terminal UI (pure ANSI, no deps)
+# htop-style TUI (blessed — scrollable, keyboard nav)
 copilot-agent dashboard
+
+# Simple ANSI fallback (no dependencies)
+copilot-agent dashboard --simple
 
 # Web UI (Hono + htmx, opens browser)
 copilot-agent web
-copilot-agent web --port 8080
+```
+
+### Configuration
+
+```bash
+# Set persistent defaults
+copilot-agent config set agent claude
+copilot-agent config set steps 50
+copilot-agent config set worktree true
+
+# View all config (defaults + global + project)
+copilot-agent config list
+
+# Per-project config: create .copilot-agent.yaml in project root
+```
+
+### Proxy management (Claude Code via Copilot)
+
+```bash
+# Start copilot-api proxy (auto-detects Copilot OAuth token)
+copilot-agent proxy start
+
+# Check status (PID, port, token, model count)
+copilot-agent proxy status
+
+# Stop proxy
+copilot-agent proxy stop
 ```
 
 ## How it works
@@ -133,6 +148,7 @@ copilot-agent web --port 8080
 4. **Task discovery** — Detects project type and generates relevant maintenance tasks
 5. **Race prevention** — File locking + process tracking prevents concurrent agents in the same directory
 6. **Worktree isolation** — Optional `--worktree` flag for parallel task execution via `git worktree`
+7. **Config layering** — Defaults → `~/.copilot-agent/config.yaml` → `.copilot-agent.yaml` → CLI flags
 
 ## Supported project types
 
