@@ -19,6 +19,8 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`diff`** | Show git changes made by an agent session |
 | **`quota`** | Track premium requests, tokens, and usage over time |
 | **`compact`** | Generate context summary for session handoff/resume |
+| **`hooks`** | Event-driven automation (on_task_complete, on_error, etc.) |
+| **`pr`** | Auto-create GitHub Pull Request from session changes |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -163,6 +165,43 @@ copilot-agent compact --save
 
 # Get a resume prompt to continue the work
 copilot-agent compact --resume-prompt
+```
+
+### Hooks (event-driven automation)
+
+```bash
+# Show configured hooks
+copilot-agent hooks list
+
+# Test-run hooks for an event
+copilot-agent hooks test on_task_complete
+```
+
+Create `~/.copilot-agent/hooks.yaml` or `.copilot-agent/hooks.yaml`:
+
+```yaml
+on_task_complete:
+  - command: "npm test"
+    name: "Run tests"
+on_session_end:
+  - command: "git push origin HEAD"
+    name: "Auto-push"
+on_error:
+  - command: "curl -X POST $SLACK_WEBHOOK -d '{\"text\":\"Agent error!\"}'"
+    name: "Notify Slack"
+```
+
+### Auto-create Pull Request
+
+```bash
+# Create PR from latest session
+copilot-agent pr
+
+# Dry-run (preview without creating)
+copilot-agent pr --dry-run
+
+# Create ready (non-draft) PR
+copilot-agent pr --no-draft
 ```
 
 ## How it works

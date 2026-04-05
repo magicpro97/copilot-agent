@@ -1,6 +1,6 @@
 {
   "name": "copilot-agent",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Autonomous AI agent manager — auto-resume, task discovery, overnight runs. Supports GitHub Copilot CLI + Claude Code.",
   "author": "magicpro97",
   "license": "MIT",
