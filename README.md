@@ -1,16 +1,21 @@
 # copilot-agent
 
-Autonomous GitHub Copilot CLI agent — auto-resume sessions, discover tasks, run overnight.
+Autonomous AI agent manager — auto-resume sessions, discover tasks, run overnight. Supports **GitHub Copilot CLI** and **Claude Code**.
 
 ## Features
 
-- **`status`** — View recent & active Copilot sessions with premium usage
-- **`watch`** — Monitor a session, auto-resume when it stops
-- **`run`** — Auto-discover and fix issues in any project
-- **`overnight`** — Run tasks continuously until a deadline (e.g. 07:00)
-- **`research`** — Research improvements, dependencies, architecture
-- **`daemon`** — Background watchdog that auto-resumes interrupted sessions
-- **`multi`** — Multi-project orchestrator (register projects, run health/research on all)
+| Command | Description |
+|---------|-------------|
+| **`status`** | View sessions & active processes from both Copilot and Claude |
+| **`watch`** | Monitor a session, auto-resume when it stops |
+| **`run`** | Auto-discover and fix issues in any project |
+| **`overnight`** | Run tasks continuously until a deadline (e.g. 07:00) |
+| **`research`** | Architecture, security, and performance analysis |
+| **`report`** | Session activity report — tools, commits, files, tokens |
+| **`dashboard`** | Real-time TUI dashboard (pure terminal) |
+| **`web`** | Web dashboard with live updates (Hono + htmx + SSE) |
+
+All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
 ## Install
 
@@ -18,18 +23,27 @@ Autonomous GitHub Copilot CLI agent — auto-resume sessions, discover tasks, ru
 npm install -g copilot-agent
 ```
 
-Requires [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) installed and authenticated.
+### Prerequisites
+
+At least one of:
+
+- [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) — installed and authenticated
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — installed and authenticated
 
 ## Usage
 
 ### Show session status
 
 ```bash
-# Recent sessions
+# All sessions (copilot + claude merged)
 copilot-agent status
 
-# Active (running) sessions only
+# Active processes only
 copilot-agent status --active
+
+# Filter by agent
+copilot-agent status --agent claude
+copilot-agent status --agent copilot
 ```
 
 ### Watch & auto-resume
@@ -38,8 +52,8 @@ copilot-agent status --active
 # Auto-detect latest incomplete session
 copilot-agent watch
 
-# Watch specific session
-copilot-agent watch abc12345-...
+# Watch specific session with Claude
+copilot-agent watch abc12345-... --agent claude
 
 # Custom resume settings
 copilot-agent watch --steps 100 --max-resumes 50
@@ -48,14 +62,17 @@ copilot-agent watch --steps 100 --max-resumes 50
 ### Discover & fix issues
 
 ```bash
-# Run on current directory
+# Run with auto-detected agent
 copilot-agent run
 
-# Run on specific project
-copilot-agent run ~/my-project
+# Run on specific project with Claude Code
+copilot-agent run ~/my-project --agent claude
 
 # Preview tasks without executing
 copilot-agent run --dry-run
+
+# Use git worktree for parallel execution
+copilot-agent run --worktree
 ```
 
 ### Overnight runner
@@ -64,57 +81,58 @@ copilot-agent run --dry-run
 # Run until 7am (default)
 copilot-agent overnight ~/my-project
 
-# Custom deadline & budget
-copilot-agent overnight --until 06:00 --max-premium 200
+# Run with Claude Code
+copilot-agent overnight --agent claude --until 07 --max-premium 200
 
-# Preview
-copilot-agent overnight --dry-run
+# Use worktree for parallel tasks
+copilot-agent overnight --worktree
+```
+
+### Session report
+
+```bash
+# Latest session
+copilot-agent report
+
+# Specific session
+copilot-agent report abc12345-...
+
+# Multiple recent sessions as JSON
+copilot-agent report -l 5 --json
+
+# Filter by project directory
+copilot-agent report --project ~/my-project
 ```
 
 ### Research
 
 ```bash
-# Run all predefined research tasks
+# Analyze current project
 copilot-agent research
 
-# Research a specific topic
-copilot-agent research "migrate from Room to SQLDelight"
+# With Claude Code
+copilot-agent research --agent claude
 ```
 
-### Background daemon
+### Dashboards
 
 ```bash
-# Start watchdog (monitors & auto-resumes sessions)
-copilot-agent daemon start --resume
+# Terminal UI (pure ANSI, no deps)
+copilot-agent dashboard
 
-# Check status / view logs / stop
-copilot-agent daemon status
-copilot-agent daemon logs
-copilot-agent daemon stop
-```
-
-### Multi-project
-
-```bash
-# Register projects
-copilot-agent multi add ~/project-a
-copilot-agent multi add ~/project-b
-copilot-agent multi list
-
-# Run health check on all projects
-copilot-agent multi health
-
-# Run research on all projects
-copilot-agent multi research --dry-run
+# Web UI (Hono + htmx, opens browser)
+copilot-agent web
+copilot-agent web --port 8080
 ```
 
 ## How it works
 
-1. **Session detection** — Reads `~/.copilot/session-state/*/events.jsonl` to detect task completion vs interruption
-2. **Auto-resume** — Uses `copilot --resume=SESSION_ID --autopilot` to continue interrupted sessions
-3. **Task discovery** — Detects project type (KMP, React, Python, etc.) and generates relevant maintenance tasks
-4. **Race prevention** — File locking via `proper-lockfile` prevents concurrent copilot runs
-5. **Process tracking** — Uses `ps-list` to find and wait for copilot processes by PID
+1. **Agent abstraction** — Unified interface for both Copilot CLI and Claude Code
+2. **Session detection** — Reads Copilot (`~/.copilot/session-state/`) and Claude (`~/.claude/projects/`) session files
+3. **Auto-resume** — Copilot: `--resume --autopilot`; Claude: `--resume --dangerously-skip-permissions`
+4. **Task discovery** — Detects project type and generates relevant maintenance tasks
+5. **Race prevention** — File locking + process tracking prevents concurrent agents in the same directory
+6. **Worktree isolation** — Optional `--worktree` flag for parallel task execution via `git worktree`
 
 ## Supported project types
 
@@ -130,8 +148,8 @@ copilot-agent multi research --dry-run
 ## Requirements
 
 - Node.js ≥ 18
-- GitHub Copilot CLI installed & authenticated
 - macOS or Linux
+- At least one: GitHub Copilot CLI or Claude Code
 
 ## License
 
