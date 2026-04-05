@@ -435,7 +435,10 @@ export class DashboardStore extends EventEmitter {
   requestDetailNow(sessionId: string, agent: AgentType): void {
     if (this.detailDebounce) clearTimeout(this.detailDebounce);
     this.detailPending = sessionId;
-    this.loadDetail(sessionId, agent);
+    // Delete cache so it always re-parses fresh
+    this.details.delete(sessionId);
+    // Don't check refreshing.detail — force a new load
+    this.loadDetailForce(sessionId, agent);
   }
 
   // ── Async detail loading (non-blocking JSONL parse) ────────────
@@ -445,11 +448,21 @@ export class DashboardStore extends EventEmitter {
     try {
       const report = await loadReportAsync(sessionId, agent);
       this.details.set(sessionId, report);
-      // Evict old entries
       if (this.details.size > 15) {
         const first = this.details.keys().next().value;
         if (first && first !== sessionId) this.details.delete(first);
       }
+      this.emit('detail', sessionId);
+    } catch { /* skip */ }
+    this.refreshing.detail = false;
+  }
+
+  // ── Force load (bypasses refreshing guard) ─────────────────────
+  private async loadDetailForce(sessionId: string, agent: AgentType): Promise<void> {
+    this.refreshing.detail = true;
+    try {
+      const report = await loadReportAsync(sessionId, agent);
+      this.details.set(sessionId, report);
       this.emit('detail', sessionId);
     } catch { /* skip */ }
     this.refreshing.detail = false;

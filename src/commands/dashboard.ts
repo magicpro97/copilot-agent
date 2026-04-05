@@ -265,7 +265,11 @@ function runReactiveDashboard(refreshSec: number, limit: number): void {
 
   sessionList.key(['enter'], () => {
     const s = store.sessions[selectedIdx];
-    if (s) store.requestDetailNow(s.id, s.agent);
+    if (s) {
+      // Show loading feedback immediately
+      detailBox.setContent('{cyan-fg}Refreshing report…{/}');
+      store.requestDetailNow(s.id, s.agent);
+    }
     focusedPanel = 'detail';
     detailBox.focus();
     sessionList.style.border.fg = BORDER_COLOR;
