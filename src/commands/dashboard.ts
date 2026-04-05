@@ -86,11 +86,21 @@ function cacheDetail(cache: DataCache, s: Session): SessionReport | null {
 function runBlessedDashboard(refreshSec: number, limit: number): void {
   const cache = createCache();
 
+  // Workaround: blessed can't parse Setulc capability in xterm-256color terminfo.
+  // Downgrade TERM temporarily so blessed doesn't crash on screen init.
+  const origTerm = process.env.TERM;
+  if (origTerm?.includes('256color')) {
+    process.env.TERM = 'xterm';
+  }
+
   const screen = blessed.screen({
     smartCSR: true,
     title: 'copilot-agent dashboard',
     fullUnicode: true,
   });
+
+  // Restore original TERM after screen init
+  if (origTerm) process.env.TERM = origTerm;
 
   // ── Color constants ────────────────────────────────────────────
   const BG = '#0d1117';

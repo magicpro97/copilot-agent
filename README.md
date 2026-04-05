@@ -23,6 +23,9 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`pr`** | Auto-create GitHub Pull Request from session changes |
 | **`log`** | Search, timeline, and export session history |
 | **`template`** | Manage custom task templates (add/list/remove/import/export) |
+| **`schedule`** | Cron-like recurring task scheduler with daemon mode |
+| **`multi`** | Multi-project orchestration — parallel runs, status tracking |
+| **`review`** | AI-powered code review of session changes, diffs, or PRs |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -235,6 +238,58 @@ copilot-agent template remove security-audit
 # Export/import templates (YAML)
 copilot-agent template export > my-templates.yaml
 copilot-agent template import team-templates.yaml
+```
+
+### Scheduled tasks
+
+```bash
+# Add a recurring schedule
+copilot-agent schedule add nightly-lint \
+  --cron "0 2 * * *" \
+  --prompt "Fix all lint errors and run tests" \
+  --project /path/to/project
+
+# List all schedules
+copilot-agent schedule list
+
+# Preview what would run next
+copilot-agent schedule dry-run
+
+# Start the scheduler daemon
+copilot-agent schedule run
+```
+
+### Multi-project orchestration
+
+```bash
+# Register projects
+copilot-agent multi add ~/project-a
+copilot-agent multi add ~/project-b
+
+# Run tasks on all projects (with Claude, in parallel)
+copilot-agent multi run --agent claude --parallel
+
+# Check per-project status
+copilot-agent multi status
+
+# Dry-run preview
+copilot-agent multi run --dry-run
+```
+
+### AI code review
+
+```bash
+# Review latest session changes
+copilot-agent review
+
+# Review with security focus
+copilot-agent review --focus security
+
+# Review current git diff
+copilot-agent review diff
+
+# Review a GitHub PR
+copilot-agent review pr 42 --agent claude
 ```
 
 ## How it works
