@@ -82,7 +82,7 @@ function runReactiveDashboard(refreshSec: number, limit: number): void {
     top: 10, left: 0, width: '45%', bottom: 3,
     tags: true,
     label: ' {cyan-fg}{bold}Sessions{/} ',
-    scrollable: true, keys: true, vi: true, mouse: true,
+    scrollable: true, keys: false, vi: false, mouse: true,
     style: {
       fg: FG, bg: BG,
       border: { fg: BORDER_COLOR }, label: { fg: ACCENT },
