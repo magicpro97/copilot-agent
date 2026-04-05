@@ -51,6 +51,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .badge{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;font-family:var(--font-mono);text-transform:uppercase}
 .badge-done{background:rgba(63,185,80,.12);color:var(--green)}
 .badge-stop{background:rgba(210,153,34,.12);color:var(--yellow)}
+.badge-claude{background:rgba(217,119,6,.15);color:#f59e0b}
+.badge-copilot{background:rgba(56,189,248,.12);color:#38bdf8}
 .detail{padding:20px;overflow-y:auto}
 .detail-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .detail-title{font-size:18px;font-weight:700}
@@ -78,8 +80,6 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .error-list li{padding:5px 0;font-size:12px;color:var(--red)}
 .more{font-size:11px;color:var(--text3);padding:4px 0}
 .empty-detail{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3)}
-.htmx-settling{opacity:0}
-.htmx-added{opacity:0;transition:opacity .3s ease}
 @media(max-width:768px){.main{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
 `;
 

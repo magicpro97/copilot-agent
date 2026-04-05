@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
-import { listSessions, getSessionReport, type SessionReport, type Session } from '../lib/session.js';
-import { findCopilotProcesses, type CopilotProcess } from '../lib/process.js';
+import { listAllSessions, getAgentSessionReport, type SessionReport, type Session } from '../lib/session.js';
+import { findAgentProcesses, type CopilotProcess } from '../lib/process.js';
 import { BOLD, CYAN, DIM, GREEN, YELLOW, RED, RESET } from '../lib/colors.js';
 
 const ESC = '\x1b';
@@ -78,23 +78,24 @@ function buildScreen(limit: number): string {
   lines.push('');
 
   // Active processes
-  const procs = findCopilotProcesses();
+  const procs = findAgentProcesses();
   lines.push(`  ${BOLD}${GREEN}● Active Processes (${procs.length})${RESET}`);
   lines.push(`  ${'─'.repeat(Math.min(cols - 4, 70))}`);
 
   if (procs.length === 0) {
-    lines.push(`  ${DIM}No copilot processes running${RESET}`);
+    lines.push(`  ${DIM}No agent processes running${RESET}`);
   } else {
     for (const p of procs) {
+      const agentTag = p.agent === 'claude' ? `${CYAN}[claude]${RESET}` : `${GREEN}[copilot]${RESET}`;
       const sid = p.sessionId ? p.sessionId.slice(0, 8) + '…' : '—';
       const cwdShort = p.cwd ? '~/' + p.cwd.split('/').slice(-2).join('/') : '—';
-      lines.push(`  ${GREEN}⬤${RESET} PID ${BOLD}${p.pid}${RESET}  ${CYAN}${sid}${RESET}  ${DIM}${cwdShort}${RESET}`);
+      lines.push(`  ${GREEN}⬤${RESET} ${agentTag} PID ${BOLD}${p.pid}${RESET}  ${CYAN}${sid}${RESET}  ${DIM}${cwdShort}${RESET}`);
     }
   }
   lines.push('');
 
   // Recent sessions
-  const sessions = listSessions(limit);
+  const sessions = listAllSessions(limit);
   lines.push(`  ${BOLD}${CYAN}● Recent Sessions (${sessions.length})${RESET}`);
   lines.push(`  ${'─'.repeat(Math.min(cols - 4, 70))}`);
 
@@ -109,7 +110,7 @@ function buildScreen(limit: number): string {
   lines.push(`  ${DIM}${headerCols.join(' ')}${RESET}`);
 
   for (const s of sessions) {
-    const report = getSessionReport(s.id);
+    const report = getAgentSessionReport(s.id, s.agent);
     const statusIcon = s.complete
       ? `${GREEN}✔ done  ${RESET}`
       : `${YELLOW}⏸ stop  ${RESET}`;
@@ -124,7 +125,7 @@ function buildScreen(limit: number): string {
 
   // Latest session detail panel
   if (sessions.length > 0) {
-    const latest = getSessionReport(sessions[0].id);
+    const latest = getAgentSessionReport(sessions[0].id, sessions[0].agent);
     if (latest) {
       lines.push(`  ${BOLD}${CYAN}● Latest Session Detail${RESET}  ${DIM}${latest.id.slice(0, 8)}…${RESET}`);
       lines.push(`  ${'─'.repeat(Math.min(cols - 4, 70))}`);

@@ -1,7 +1,8 @@
 import type { Command } from 'commander';
 import { detectProjectType, detectProjectName, detectMainBranch } from '../lib/detect.js';
 import { getTasksForProject } from '../lib/tasks.js';
-import { runCopilotTask, assertCopilot } from '../lib/process.js';
+import { runAgentTask } from '../lib/process.js';
+import { resolveAgent, assertAgent, type AgentType } from '../lib/provider.js';
 import { withLock } from '../lib/lock.js';
 import { isGitRepo, gitCurrentBranch, gitStatus, gitStash, gitCheckout, gitCreateBranch, gitCountCommits, createWorktree, removeWorktree } from '../lib/git.js';
 import { log, ok, warn, fail, info, notify } from '../lib/logger.js';
@@ -16,6 +17,7 @@ export function registerRunCommand(program: Command): void {
     .option('-p, --max-premium <n>', 'Max total premium requests', '50')
     .option('--dry-run', 'Show tasks without executing')
     .option('--worktree', 'Use git worktree for parallel execution (default: wait for idle)')
+    .option('-a, --agent <type>', 'Agent to use: copilot or claude')
     .action(async (dir: string | undefined, opts) => {
       try {
         await runCommand(dir ?? process.cwd(), {
@@ -24,6 +26,7 @@ export function registerRunCommand(program: Command): void {
           maxPremium: parseInt(opts.maxPremium, 10),
           dryRun: opts.dryRun ?? false,
           useWorktree: opts.worktree ?? false,
+          agent: resolveAgent(opts.agent),
         });
       } catch (err) {
         fail(`Run error: ${err instanceof Error ? err.message : err}`);
@@ -38,16 +41,17 @@ interface RunOptions {
   maxPremium: number;
   dryRun: boolean;
   useWorktree: boolean;
+  agent: AgentType;
 }
 
 async function runCommand(dir: string, opts: RunOptions): Promise<void> {
-  assertCopilot();
+  assertAgent(opts.agent);
 
   const projectType = detectProjectType(dir);
   const name = detectProjectName(dir);
   const mainBranch = isGitRepo(dir) ? detectMainBranch(dir) : null;
 
-  info(`Project: ${CYAN}${name}${RESET} (${projectType})`);
+  info(`Project: ${CYAN}${name}${RESET} (${projectType}) — agent: ${opts.agent}`);
   if (mainBranch) info(`Main branch: ${mainBranch}`);
 
   const tasks = getTasksForProject(projectType).slice(0, opts.maxTasks);
@@ -100,9 +104,14 @@ async function runCommand(dir: string, opts: RunOptions): Promise<void> {
 
     if (opts.useWorktree && isGitRepo(dir)) {
       try {
-        taskDir = createWorktree(dir, branchName, mainBranch ?? undefined);
-        worktreeCreated = true;
-        info(`Created worktree: ${taskDir}`);
+        const wt = createWorktree(dir, branchName);
+        if (wt) {
+          taskDir = wt;
+          worktreeCreated = true;
+          info(`Created worktree: ${taskDir}`);
+        } else {
+          warn('Worktree creation returned null, falling back to main dir');
+        }
       } catch (err) {
         warn(`Worktree creation failed, falling back to main dir: ${err}`);
         taskDir = dir;
@@ -110,7 +119,7 @@ async function runCommand(dir: string, opts: RunOptions): Promise<void> {
     }
 
     const result = await withLock('copilot-run', () =>
-      runCopilotTask(task.prompt, opts.steps, taskDir, opts.useWorktree),
+      runAgentTask(opts.agent, task.prompt, opts.steps, taskDir, opts.useWorktree),
     );
 
     const commitRef = worktreeCreated ? taskDir : dir;

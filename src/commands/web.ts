@@ -3,8 +3,8 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { serve } from '@hono/node-server';
 import { spawn } from 'node:child_process';
-import { listSessions, getSessionReport } from '../lib/session.js';
-import { findCopilotProcesses } from '../lib/process.js';
+import { listAllSessions, getAgentSessionReport } from '../lib/session.js';
+import { findAgentProcesses } from '../lib/process.js';
 import { ok, info, fail } from '../lib/logger.js';
 import { layoutHead, layoutFoot } from '../web/layout.js';
 import { renderStats, renderProcesses, renderSessionList, renderDetail } from '../web/views.js';
@@ -21,10 +21,18 @@ export function registerWebCommand(program: Command): void {
 }
 
 function getData() {
-  const sessions = listSessions(20);
-  const reports = sessions.map(s => getSessionReport(s.id)).filter(r => r !== null);
-  const processes = findCopilotProcesses();
+  const sessions = listAllSessions(20);
+  const reports = sessions.map(s => getAgentSessionReport(s.id, s.agent)).filter(r => r !== null);
+  const processes = findAgentProcesses();
   return { sessions: reports, processes };
+}
+
+function simpleHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return h.toString(36);
 }
 
 function startWebServer(port: number, autoOpen: boolean): void {
@@ -34,29 +42,35 @@ function startWebServer(port: number, autoOpen: boolean): void {
   app.get('/api/sessions', (c) => c.json(getData()));
 
   app.get('/api/session/:id', (c) => {
-    const report = getSessionReport(c.req.param('id'));
+    const report = getAgentSessionReport(c.req.param('id'));
     if (!report) return c.json({ error: 'Not found' }, 404);
     return c.json(report);
   });
 
-  // ─── SSE for live updates ────────────────────────────
+  // ─── SSE for live updates (only push when data changes) ──
   app.get('/events', (c) => {
     return streamSSE(c, async (stream) => {
+      let prevStatsHash = '';
+      let prevProcsHash = '';
+
       while (true) {
         const { sessions, processes } = getData();
-        // Push partial HTML fragments for htmx to swap
-        await stream.writeSSE({
-          event: 'stats',
-          data: renderStats(sessions),
-        });
-        await stream.writeSSE({
-          event: 'procs',
-          data: renderProcesses(processes),
-        });
-        await stream.writeSSE({
-          event: 'proc-count',
-          data: String(processes.length),
-        });
+
+        const statsHtml = renderStats(sessions);
+        const procsHtml = renderProcesses(processes);
+        const statsHash = simpleHash(statsHtml);
+        const procsHash = simpleHash(procsHtml);
+
+        if (statsHash !== prevStatsHash) {
+          await stream.writeSSE({ event: 'stats', data: statsHtml });
+          prevStatsHash = statsHash;
+        }
+        if (procsHash !== prevProcsHash) {
+          await stream.writeSSE({ event: 'procs', data: procsHtml });
+          await stream.writeSSE({ event: 'proc-count', data: String(processes.length) });
+          prevProcsHash = procsHash;
+        }
+
         await stream.sleep(5000);
       }
     });
@@ -64,7 +78,7 @@ function startWebServer(port: number, autoOpen: boolean): void {
 
   // ─── htmx Partials ──────────────────────────────────
   app.get('/partial/detail/:id', (c) => {
-    const report = getSessionReport(c.req.param('id'));
+    const report = getAgentSessionReport(c.req.param('id'));
     if (!report) return c.html('<div class="empty-detail">Session not found</div>');
     return c.html(renderDetail(report));
   });
@@ -90,17 +104,17 @@ function startWebServer(port: number, autoOpen: boolean): void {
 
     <div class="stats"
       sse-swap="stats"
-      hx-swap="innerHTML">
+      hx-swap="innerHTML settle:0s swap:0s">
       ${renderStats(sessions)}
     </div>
 
     <div class="procs">
       <div class="procs-header">
-        ⬤ Active Processes <span class="count" sse-swap="proc-count" hx-swap="innerHTML">${processes.length}</span>
+        ⬤ Active Processes <span class="count" sse-swap="proc-count" hx-swap="innerHTML settle:0s swap:0s">${processes.length}</span>
       </div>
       <div class="procs-body"
         sse-swap="procs"
-        hx-swap="innerHTML">
+        hx-swap="innerHTML settle:0s swap:0s">
         ${renderProcesses(processes)}
       </div>
     </div>

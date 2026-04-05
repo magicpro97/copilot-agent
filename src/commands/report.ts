@@ -1,8 +1,8 @@
 import type { Command } from 'commander';
 import { resolve } from 'node:path';
 import {
-  listSessions,
-  getSessionReport,
+  listAllSessions,
+  getAgentSessionReport,
   type SessionReport,
 } from '../lib/session.js';
 import { log, warn, fail } from '../lib/logger.js';
@@ -11,16 +11,17 @@ import { BOLD, CYAN, DIM, GREEN, YELLOW, RED, RESET } from '../lib/colors.js';
 export function registerReportCommand(program: Command): void {
   program
     .command('report [session-id]')
-    .description('Show what copilot did — timeline, tools, commits, files changed')
+    .description('Show what an agent did — timeline, tools, commits, files changed')
     .option('-l, --limit <n>', 'Number of recent sessions to report (when no ID given)', '1')
     .option('--project <dir>', 'Filter sessions by project directory')
     .option('--json', 'Output raw JSON')
+    .option('-a, --agent <type>', 'Filter by agent: copilot or claude')
     .action((sessionId: string | undefined, opts) => {
       try {
         if (sessionId) {
-          reportSingle(sessionId, opts.json ?? false);
+          reportSingle(sessionId, opts.json ?? false, opts.agent);
         } else {
-          reportRecent(parseInt(opts.limit, 10), opts.project, opts.json ?? false);
+          reportRecent(parseInt(opts.limit, 10), opts.project, opts.json ?? false, opts.agent);
         }
       } catch (err) {
         fail(`Report error: ${err instanceof Error ? err.message : err}`);
@@ -29,8 +30,8 @@ export function registerReportCommand(program: Command): void {
     });
 }
 
-function reportRecent(limit: number, projectDir?: string, json = false): void {
-  let sessions = listSessions(limit * 3); // fetch extra to filter
+function reportRecent(limit: number, projectDir?: string, json = false, agentFilter?: string): void {
+  let sessions = listAllSessions(limit * 3, agentFilter as any);
   if (projectDir) {
     const target = resolve(projectDir);
     sessions = sessions.filter(s => s.cwd && resolve(s.cwd) === target);
@@ -43,12 +44,12 @@ function reportRecent(limit: number, projectDir?: string, json = false): void {
   }
 
   for (const s of sessions) {
-    reportSingle(s.id, json);
+    reportSingle(s.id, json, s.agent);
   }
 }
 
-function reportSingle(sid: string, json = false): void {
-  const report = getSessionReport(sid);
+function reportSingle(sid: string, json = false, agent?: string): void {
+  const report = getAgentSessionReport(sid, agent as any);
   if (!report) {
     warn(`Session ${sid} not found or invalid.`);
     return;
@@ -95,7 +96,7 @@ function renderReport(r: SessionReport): void {
 
   log('');
   log(`${BOLD}╔${'═'.repeat(62)}╗${RESET}`);
-  log(`${BOLD}║${RESET}  📋 Session Report: ${CYAN}${r.id.slice(0, 8)}…${RESET}${' '.repeat(62 - 28 - r.id.slice(0, 8).length)}${BOLD}║${RESET}`);
+  log(`${BOLD}║${RESET}  📋 Session Report: ${CYAN}${r.id.slice(0, 8)}…${RESET} (${r.agent})${' '.repeat(Math.max(0, 62 - 32 - r.id.slice(0, 8).length - r.agent.length))}${BOLD}║${RESET}`);
   log(`${BOLD}╚${'═'.repeat(62)}╝${RESET}`);
 
   // Overview

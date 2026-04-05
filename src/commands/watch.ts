@@ -6,13 +6,14 @@ import {
   getLastEvent,
   findLatestIncomplete,
   getSessionCwd,
+  findLatestIncompleteForAgent,
 } from '../lib/session.js';
 import {
   findPidForSession,
   waitForExit,
-  runCopilotResume,
-  assertCopilot,
+  runAgentResume,
 } from '../lib/process.js';
+import { resolveAgent, assertAgent, type AgentType } from '../lib/provider.js';
 import { log, ok, warn, fail, info, notify } from '../lib/logger.js';
 import { CYAN, RESET } from '../lib/colors.js';
 
@@ -24,6 +25,7 @@ export function registerWatchCommand(program: Command): void {
     .option('-r, --max-resumes <n>', 'Max number of resumes', '10')
     .option('-c, --cooldown <n>', 'Seconds between resumes', '10')
     .option('-m, --message <msg>', 'Message to send on resume')
+    .option('-a, --agent <type>', 'Agent to use: copilot or claude')
     .action(async (sid: string | undefined, opts) => {
       try {
         await watchCommand(sid, {
@@ -31,6 +33,7 @@ export function registerWatchCommand(program: Command): void {
           maxResumes: parseInt(opts.maxResumes, 10),
           cooldown: parseInt(opts.cooldown, 10),
           message: opts.message,
+          agent: resolveAgent(opts.agent),
         });
       } catch (err) {
         fail(`Watch error: ${err instanceof Error ? err.message : err}`);
@@ -44,18 +47,20 @@ interface WatchOptions {
   maxResumes: number;
   cooldown: number;
   message?: string;
+  agent: AgentType;
 }
 
 async function watchCommand(sid: string | undefined, opts: WatchOptions): Promise<void> {
-  assertCopilot();
+  assertAgent(opts.agent);
 
   if (!sid) {
-    sid = findLatestIncomplete() ?? undefined;
+    const result = findLatestIncompleteForAgent(opts.agent);
+    sid = result?.id;
     if (!sid) {
       fail('No incomplete session found.');
       process.exit(1);
     }
-    info(`Auto-detected incomplete session: ${CYAN}${sid}${RESET}`);
+    info(`Auto-detected incomplete ${opts.agent} session: ${CYAN}${sid}${RESET}`);
   }
 
   if (!validateSession(sid)) {
@@ -71,10 +76,10 @@ async function watchCommand(sid: string | undefined, opts: WatchOptions): Promis
   let resumes = 0;
 
   while (resumes < opts.maxResumes) {
-    const pid = findPidForSession(sid);
+    const pid = findPidForSession(sid, opts.agent);
 
     if (pid) {
-      info(`Watching PID ${pid} for session ${CYAN}${sid.slice(0, 8)}${RESET}…`);
+      info(`Watching PID ${pid} for ${opts.agent} session ${CYAN}${sid.slice(0, 8)}${RESET}…`);
       const exited = await waitForExit(pid);
 
       if (!exited) {
@@ -102,7 +107,8 @@ async function watchCommand(sid: string | undefined, opts: WatchOptions): Promis
     }
 
     const cwd = getSessionCwd(sid) || undefined;
-    const result = await runCopilotResume(
+    const result = await runAgentResume(
+      opts.agent,
       sid,
       opts.steps,
       opts.message ?? 'Continue remaining work. Pick up where you left off and complete the task.',

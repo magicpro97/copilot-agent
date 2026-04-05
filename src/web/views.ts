@@ -62,11 +62,15 @@ export function renderStats(sessions: SessionReport[]): string {
 
 // ─── Process List ──────────────────────────────────────────
 export function renderProcesses(procs: CopilotProcess[]): string {
-  if (procs.length === 0) return '<div class="empty">No active copilot processes</div>';
+  if (procs.length === 0) return '<div class="empty">No active agent processes</div>';
   return procs.map(p => {
     const sid = p.sessionId ? p.sessionId.slice(0, 8) + '…' : '—';
+    const agentBadge = p.agent === 'claude'
+      ? '<span class="badge badge-claude">claude</span>'
+      : '<span class="badge badge-copilot">copilot</span>';
     return `<div class="proc">
       <div class="proc-dot"></div>
+      ${agentBadge}
       <span class="proc-pid">PID ${p.pid}</span>
       <span class="proc-sid">${esc(sid)}</span>
       <span class="proc-cwd">${esc(p.cwd ?? '')}</span>
@@ -79,16 +83,19 @@ export function renderSessionList(sessions: SessionReport[], selectedId?: string
   return sessions.map(s => {
     const proj = (s.cwd ?? '').split('/').pop() ?? '—';
     const isActive = s.id === selectedId;
+    const agentBadge = s.agent === 'claude'
+      ? '<span class="badge badge-claude">claude</span>'
+      : '<span class="badge badge-copilot">copilot</span>';
     return `<div class="s-item${isActive ? ' active' : ''}"
       hx-get="/partial/detail/${s.id}" hx-target="#detail" hx-swap="innerHTML"
       onclick="document.querySelectorAll('.s-item').forEach(e=>e.classList.remove('active'));this.classList.add('active')">
       <div class="s-row">
         <span class="s-icon">${s.complete ? '✅' : '⏸️'}</span>
         <div class="s-info">
-          <div class="s-title">${esc(proj)} — ${esc(s.summary || '(no summary)')}</div>
+          <div class="s-title">${agentBadge} ${esc(proj)} — ${esc(s.summary || '(no summary)')}</div>
           <div class="s-meta">
             <span>${fmtDur(s.durationMs)}</span>
-            <span>${fmt(s.premiumRequests)} premium</span>
+            <span>${s.agent === 'claude' ? '' : fmt(s.premiumRequests) + ' premium'}</span>
             <span>${fmtAgo(s.endTime)}</span>
             <span class="badge ${s.complete ? 'badge-done' : 'badge-stop'}">${s.complete ? 'done' : 'stopped'}</span>
           </div>
@@ -107,9 +114,13 @@ export function renderDetail(s: SessionReport): string {
 
   let html = '';
 
+  const agentBadge = s.agent === 'claude'
+    ? '<span class="badge badge-claude" style="margin-left:8px">claude</span>'
+    : '<span class="badge badge-copilot" style="margin-left:8px">copilot</span>';
+
   // Header
   html += `<div class="detail-head">
-    <div class="detail-title">${esc(proj)}</div>
+    <div class="detail-title">${esc(proj)}${agentBadge}</div>
     <div class="detail-id">${s.id}</div>
   </div>`;
 

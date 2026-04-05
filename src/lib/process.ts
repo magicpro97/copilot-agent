@@ -1,20 +1,12 @@
 import { execSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
-import { getLatestSessionId, getSessionPremium, getSessionCwd } from './session.js';
+import { getLatestSessionId, getSessionPremium, getSessionCwd, getLatestClaudeSessionId, getClaudeSessionCwd } from './session.js';
 import { log, warn, fail } from './logger.js';
+import type { AgentType, AgentProcess, AgentResult } from './provider.js';
 
-export interface CopilotProcess {
-  pid: number;
-  command: string;
-  sessionId?: string;
-  cwd?: string;
-}
-
-export interface CopilotResult {
-  exitCode: number;
-  sessionId: string | null;
-  premium: number;
-}
+// Re-export for backward compatibility
+export type CopilotProcess = AgentProcess;
+export type CopilotResult = AgentResult;
 
 export function isCopilotInstalled(): boolean {
   try {
@@ -32,44 +24,56 @@ export function assertCopilot(): void {
   }
 }
 
-export function findCopilotProcesses(): CopilotProcess[] {
+/**
+ * Find running agent processes (copilot, claude, or both).
+ */
+export function findAgentProcesses(agentFilter?: AgentType): AgentProcess[] {
   try {
     const output = execSync('ps -eo pid,command', { encoding: 'utf-8' });
-    const results: CopilotProcess[] = [];
+    const results: AgentProcess[] = [];
     const myPid = process.pid;
     const parentPid = process.ppid;
+
     for (const line of output.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      if (
-        (trimmed.includes('copilot') || trimmed.includes('@githubnext/copilot')) &&
-        !trimmed.includes('ps -eo') &&
-        !trimmed.includes('copilot-agent') &&
-        !trimmed.includes('grep')
-      ) {
-        const match = trimmed.match(/^(\d+)\s+(.+)$/);
-        if (match) {
-          const pid = parseInt(match[1], 10);
-          // Exclude our own process tree
-          if (pid === myPid || pid === parentPid) continue;
-          const cmd = match[2];
-          const sidMatch = cmd.match(/resume[= ]+([a-f0-9-]{36})/);
-          // Try to get cwd of the process
-          let cwd: string | undefined;
-          try {
-            cwd = execSync(`lsof -p ${pid} -Fn 2>/dev/null | grep '^n/' | head -1`, {
-              encoding: 'utf-8',
-              stdio: ['pipe', 'pipe', 'pipe'],
-            }).trim().slice(1) || undefined;
-          } catch { /* best effort */ }
-          // Fallback: get cwd from session if we know the session
-          const sid = sidMatch?.[1];
-          if (!cwd && sid) {
-            cwd = getSessionCwd(sid) || undefined;
-          }
-          results.push({ pid, command: cmd, sessionId: sid, cwd });
-        }
+
+      const isCopilot = (trimmed.includes('copilot') || trimmed.includes('@githubnext/copilot'))
+        && !trimmed.includes('copilot-agent') && !trimmed.includes('copilot-api');
+      const isClaude = trimmed.includes('claude') && !trimmed.includes('claude-code')
+        && !trimmed.includes('copilot-agent');
+
+      if (!isCopilot && !isClaude) continue;
+      if (trimmed.includes('ps -eo') || trimmed.includes('grep')) continue;
+
+      const agent: AgentType = isClaude ? 'claude' : 'copilot';
+      if (agentFilter && agent !== agentFilter) continue;
+
+      const match = trimmed.match(/^(\d+)\s+(.+)$/);
+      if (!match) continue;
+
+      const pid = parseInt(match[1], 10);
+      if (pid === myPid || pid === parentPid) continue;
+      const cmd = match[2];
+
+      // Extract session ID from command args
+      const sidMatch = agent === 'copilot'
+        ? cmd.match(/resume[= ]+([a-f0-9-]{36})/)
+        : cmd.match(/(?:--resume|--session-id)[= ]+([a-f0-9-]{36})/);
+
+      let cwd: string | undefined;
+      try {
+        cwd = execSync(`lsof -p ${pid} -Fn 2>/dev/null | grep '^n/' | head -1`, {
+          encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim().slice(1) || undefined;
+      } catch { /* best effort */ }
+
+      const sid = sidMatch?.[1];
+      if (!cwd && sid) {
+        cwd = (agent === 'copilot' ? getSessionCwd(sid) : getClaudeSessionCwd(sid)) || undefined;
       }
+
+      results.push({ pid, command: cmd, sessionId: sid, cwd, agent });
     }
     return results;
   } catch {
@@ -77,8 +81,13 @@ export function findCopilotProcesses(): CopilotProcess[] {
   }
 }
 
-export function findPidForSession(sid: string): number | null {
-  const procs = findCopilotProcesses();
+/** @deprecated Use findAgentProcesses('copilot') */
+export function findCopilotProcesses(): AgentProcess[] {
+  return findAgentProcesses('copilot');
+}
+
+export function findPidForSession(sid: string, agent?: AgentType): number | null {
+  const procs = findAgentProcesses(agent);
   const matching = procs
     .filter(p => p.command.includes(sid))
     .sort((a, b) => b.pid - a.pid);
@@ -86,26 +95,27 @@ export function findPidForSession(sid: string): number | null {
 }
 
 /**
- * SAFETY: Wait until no copilot is running in the SAME directory.
- * Copilot in different directories/worktrees can run in parallel.
+ * SAFETY: Wait until no agent is running in the SAME directory.
  */
-export async function waitForCopilotInDir(
+export async function waitForAgentInDir(
   dir: string,
+  agent?: AgentType,
   timeoutMs = 14_400_000,
   pollMs = 10_000,
 ): Promise<void> {
   const targetDir = resolve(dir);
   const start = Date.now();
   let warned = false;
+  const label = agent ?? 'agent';
   while (Date.now() - start < timeoutMs) {
-    const procs = findCopilotProcesses();
+    const procs = findAgentProcesses(agent);
     const conflicting = procs.filter(p => {
       if (!p.cwd) return false;
       return resolve(p.cwd) === targetDir;
     });
     if (conflicting.length === 0) return;
     if (!warned) {
-      warn(`Waiting for copilot in ${targetDir} to finish...`);
+      warn(`Waiting for ${label} in ${targetDir} to finish...`);
       for (const p of conflicting) {
         log(`  PID ${p.pid}: ${p.command.slice(0, 80)}`);
       }
@@ -113,17 +123,19 @@ export async function waitForCopilotInDir(
     }
     await sleep(pollMs);
   }
-  warn('Timeout waiting for copilot to finish in directory');
+  warn(`Timeout waiting for ${label} to finish in directory`);
 }
 
-/**
- * SAFETY: Check if a session already has a running copilot process.
- * If so, refuse to spawn another one to prevent corruption.
- */
-export function assertSessionNotRunning(sid: string): void {
-  const pid = findPidForSession(sid);
+/** @deprecated Use waitForAgentInDir */
+export function waitForCopilotInDir(dir: string, timeoutMs?: number, pollMs?: number) {
+  return waitForAgentInDir(dir, 'copilot', timeoutMs, pollMs);
+}
+
+export function assertSessionNotRunning(sid: string, agent?: AgentType): void {
+  const pid = findPidForSession(sid, agent);
   if (pid) {
-    fail(`Session ${sid.slice(0, 8)}… already has copilot running (PID ${pid}). Cannot resume — would corrupt the session.`);
+    const label = agent ?? 'agent';
+    fail(`Session ${sid.slice(0, 8)}… already has ${label} running (PID ${pid}). Cannot resume.`);
     process.exit(1);
   }
 }
@@ -135,24 +147,22 @@ export async function waitForExit(pid: number, timeoutMs = 14_400_000): Promise<
       process.kill(pid, 0);
       await sleep(5000);
     } catch {
-      return true; // process exited
+      return true;
     }
   }
-  return false; // timeout
+  return false;
 }
+
+// ─── Copilot-specific runners ───
 
 export async function runCopilot(
   args: string[],
   options?: { cwd?: string; useWorktree?: boolean },
-): Promise<CopilotResult> {
+): Promise<AgentResult> {
   const dir = options?.cwd ?? process.cwd();
 
-  if (options?.useWorktree) {
-    // Worktree mode: create separate worktree, no waiting needed
-    // (caller is responsible for creating worktree and passing its path)
-  } else {
-    // Default: wait for copilot in same directory to finish
-    await waitForCopilotInDir(dir);
+  if (!options?.useWorktree) {
+    await waitForAgentInDir(dir, 'copilot');
   }
 
   return new Promise((resolve) => {
@@ -163,14 +173,10 @@ export async function runCopilot(
     });
 
     child.on('close', async (code) => {
-      await sleep(3000); // let events flush
+      await sleep(3000);
       const sid = getLatestSessionId();
       const premium = sid ? getSessionPremium(sid) : 0;
-      resolve({
-        exitCode: code ?? 1,
-        sessionId: sid,
-        premium,
-      });
+      resolve({ exitCode: code ?? 1, sessionId: sid, premium });
     });
 
     child.on('error', () => {
@@ -180,39 +186,92 @@ export async function runCopilot(
 }
 
 export function runCopilotResume(
-  sid: string,
-  steps: number,
-  message?: string,
-  cwd?: string,
-): Promise<CopilotResult> {
-  // SAFETY: Refuse if session already running
-  assertSessionNotRunning(sid);
-
+  sid: string, steps: number, message?: string, cwd?: string,
+): Promise<AgentResult> {
+  assertSessionNotRunning(sid, 'copilot');
   const args = [
-    `--resume=${sid}`,
-    '--autopilot',
-    '--allow-all',
-    '--max-autopilot-continues',
-    String(steps),
-    '--no-ask-user',
+    `--resume=${sid}`, '--autopilot', '--allow-all',
+    '--max-autopilot-continues', String(steps), '--no-ask-user',
   ];
   if (message) args.push('-p', message);
   return runCopilot(args, { cwd });
 }
 
 export function runCopilotTask(
-  prompt: string,
-  steps: number,
-  cwd?: string,
-  useWorktree?: boolean,
-): Promise<CopilotResult> {
+  prompt: string, steps: number, cwd?: string, useWorktree?: boolean,
+): Promise<AgentResult> {
   return runCopilot([
-    '-p', prompt,
-    '--autopilot',
-    '--allow-all',
-    '--max-autopilot-continues', String(steps),
-    '--no-ask-user',
+    '-p', prompt, '--autopilot', '--allow-all',
+    '--max-autopilot-continues', String(steps), '--no-ask-user',
   ], { cwd, useWorktree });
+}
+
+// ─── Claude Code runners ───
+
+export async function runClaude(
+  args: string[],
+  options?: { cwd?: string; useWorktree?: boolean },
+): Promise<AgentResult> {
+  const dir = options?.cwd ?? process.cwd();
+
+  if (!options?.useWorktree) {
+    await waitForAgentInDir(dir, 'claude');
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn('claude', args, {
+      cwd: options?.cwd,
+      stdio: 'inherit',
+      env: { ...process.env },
+    });
+
+    child.on('close', async (code) => {
+      await sleep(2000);
+      const sid = getLatestClaudeSessionId(options?.cwd);
+      resolve({ exitCode: code ?? 1, sessionId: sid, premium: 0 });
+    });
+
+    child.on('error', () => {
+      resolve({ exitCode: 1, sessionId: null, premium: 0 });
+    });
+  });
+}
+
+export function runClaudeResume(
+  sid: string, _steps: number, message?: string, cwd?: string,
+): Promise<AgentResult> {
+  assertSessionNotRunning(sid, 'claude');
+  const args = ['--resume', sid, '--dangerously-skip-permissions'];
+  if (message) args.push(message);
+  return runClaude(args, { cwd });
+}
+
+export function runClaudeTask(
+  prompt: string, _steps: number, cwd?: string, useWorktree?: boolean,
+): Promise<AgentResult> {
+  return runClaude([
+    '--print', '--dangerously-skip-permissions',
+    '--output-format', 'text',
+    prompt,
+  ], { cwd, useWorktree });
+}
+
+// ─── Unified runners ───
+
+export function runAgentTask(
+  agent: AgentType, prompt: string, steps: number, cwd?: string, useWorktree?: boolean,
+): Promise<AgentResult> {
+  return agent === 'claude'
+    ? runClaudeTask(prompt, steps, cwd, useWorktree)
+    : runCopilotTask(prompt, steps, cwd, useWorktree);
+}
+
+export function runAgentResume(
+  agent: AgentType, sid: string, steps: number, message?: string, cwd?: string,
+): Promise<AgentResult> {
+  return agent === 'claude'
+    ? runClaudeResume(sid, steps, message, cwd)
+    : runCopilotResume(sid, steps, message, cwd);
 }
 
 function sleep(ms: number): Promise<void> {

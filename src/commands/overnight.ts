@@ -3,10 +3,11 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { detectProjectType, detectProjectName, detectMainBranch } from '../lib/detect.js';
 import { getTasksForProject } from '../lib/tasks.js';
-import { runCopilotTask, assertCopilot, findPidForSession, findCopilotProcesses, waitForExit, waitForCopilotInDir, runCopilotResume } from '../lib/process.js';
+import { runAgentTask, runAgentResume, findPidForSession, findAgentProcesses, waitForExit, waitForAgentInDir } from '../lib/process.js';
+import { resolveAgent, assertAgent, type AgentType } from '../lib/provider.js';
 import { withLock } from '../lib/lock.js';
 import { isGitRepo, gitCurrentBranch, gitStash, gitCheckout, gitCreateBranch, gitCountCommits, createWorktree, removeWorktree } from '../lib/git.js';
-import { findLatestIncomplete, validateSession, hasTaskComplete, getSessionCwd } from '../lib/session.js';
+import { findLatestIncomplete, validateSession, hasTaskComplete, getSessionCwd, findLatestIncompleteForAgent } from '../lib/session.js';
 import { log, ok, warn, fail, info, setLogFile, notify } from '../lib/logger.js';
 import { BOLD, CYAN, DIM, RESET } from '../lib/colors.js';
 
@@ -20,6 +21,7 @@ export function registerOvernightCommand(program: Command): void {
     .option('-p, --max-premium <n>', 'Max premium requests budget', '300')
     .option('--dry-run', 'Show plan without executing')
     .option('--worktree', 'Use git worktree for parallel execution (default: wait for idle)')
+    .option('-a, --agent <type>', 'Agent to use: copilot or claude')
     .action(async (dir: string | undefined, opts) => {
       try {
         await overnightCommand(dir ?? process.cwd(), {
@@ -29,6 +31,7 @@ export function registerOvernightCommand(program: Command): void {
           maxPremium: parseInt(opts.maxPremium, 10),
           dryRun: opts.dryRun ?? false,
           useWorktree: opts.worktree ?? false,
+          agent: resolveAgent(opts.agent),
         });
       } catch (err) {
         fail(`Overnight error: ${err instanceof Error ? err.message : err}`);
@@ -44,6 +47,7 @@ interface OvernightOptions {
   maxPremium: number;
   dryRun: boolean;
   useWorktree: boolean;
+  agent: AgentType;
 }
 
 function isPastDeadline(untilHour: number): boolean {
@@ -52,7 +56,7 @@ function isPastDeadline(untilHour: number): boolean {
 }
 
 async function overnightCommand(dir: string, opts: OvernightOptions): Promise<void> {
-  assertCopilot();
+  assertAgent(opts.agent);
 
   const ts = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
   const logPath = join(homedir(), '.copilot', 'auto-resume-logs', `overnight-${ts}.log`);
@@ -62,8 +66,7 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
   const projectType = detectProjectType(dir);
   const mainBranch = isGitRepo(dir) ? detectMainBranch(dir) : null;
 
-  info(`Overnight runner for ${CYAN}${name}${RESET} (${projectType})`);
-  info(`Deadline: ${String(opts.until).padStart(2, '0')}:00`);
+  info(`Overnight runner for ${CYAN}${name}${RESET} (${projectType}) — agent: ${opts.agent}`);  info(`Deadline: ${String(opts.until).padStart(2, '0')}:00`);
   info(`Max premium: ${opts.maxPremium}, Steps: ${opts.steps}`);
   info(`Log: ${logPath}`);
 
@@ -76,19 +79,21 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
   }
 
   // Phase 1: Resume existing incomplete session
-  const existingSession = findLatestIncomplete();
+  const existingResult = findLatestIncompleteForAgent(opts.agent);
+  const existingSession = existingResult?.id;
   if (existingSession && validateSession(existingSession)) {
     info(`Found incomplete session: ${existingSession}`);
-    const pid = findPidForSession(existingSession);
+    const pid = findPidForSession(existingSession, opts.agent);
     if (pid) {
-      info(`Waiting for running copilot (PID ${pid})...`);
+      info(`Waiting for running ${opts.agent} (PID ${pid})...`);
       await waitForExit(pid);
     }
 
     if (!hasTaskComplete(existingSession) && !isPastDeadline(opts.until)) {
       info('Resuming incomplete session...');
       const cwd = getSessionCwd(existingSession) || dir;
-      await runCopilotResume(
+      await runAgentResume(
+        opts.agent,
         existingSession,
         opts.steps,
         'Continue remaining work. Complete the task.',
@@ -134,9 +139,14 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
 
     if (opts.useWorktree && isGitRepo(dir)) {
       try {
-        taskDir = createWorktree(dir, branchName, mainBranch ?? undefined);
-        worktreeCreated = true;
-        info(`Created worktree: ${taskDir}`);
+        const wt = createWorktree(dir, branchName);
+        if (wt) {
+          taskDir = wt;
+          worktreeCreated = true;
+          info(`Created worktree: ${taskDir}`);
+        } else {
+          warn('Worktree creation returned null, falling back to main dir');
+        }
       } catch (err) {
         warn(`Worktree creation failed, falling back to main dir: ${err}`);
         taskDir = dir;
@@ -145,7 +155,7 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
 
     try {
       const result = await withLock('copilot-overnight', () =>
-        runCopilotTask(task.prompt, opts.steps, taskDir, opts.useWorktree),
+        runAgentTask(opts.agent, task.prompt, opts.steps, taskDir, opts.useWorktree),
       );
 
       const commitRef = worktreeCreated ? taskDir : dir;

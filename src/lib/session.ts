@@ -4,8 +4,9 @@ import {
   readFileSync,
   statSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { homedir } from 'node:os';
+import type { AgentType } from './provider.js';
 
 export interface Session {
   id: string;
@@ -16,6 +17,7 @@ export interface Session {
   summary: string;
   cwd: string;
   complete: boolean;
+  agent: AgentType;
 }
 
 export interface SessionReport {
@@ -36,9 +38,12 @@ export interface SessionReport {
   filesEdited: string[];
   errors: string[];
   taskCompletions: string[];
+  agent: AgentType;
 }
 
 const SESSION_DIR = join(homedir(), '.copilot', 'session-state');
+const CLAUDE_DIR = join(homedir(), '.claude');
+const CLAUDE_PROJECTS_DIR = join(CLAUDE_DIR, 'projects');
 
 export function getSessionDir(): string {
   return SESSION_DIR;
@@ -80,6 +85,7 @@ export function listSessions(limit = 20): Session[] {
     summary: getSessionSummary(s.id),
     cwd: getSessionCwd(s.id),
     complete: hasTaskComplete(s.id),
+    agent: 'copilot' as AgentType,
   }));
 }
 
@@ -221,6 +227,7 @@ export function getSessionReport(sid: string): SessionReport | null {
     filesEdited: [],
     errors: [],
     taskCompletions: [],
+    agent: 'copilot',
   };
 
   for (const line of lines) {
@@ -302,4 +309,284 @@ export function getSessionReport(sid: string): SessionReport | null {
   }
 
   return report;
+}
+
+// ─── Claude Code session support ───
+
+/**
+ * Decode Claude's encoded project path back to filesystem path.
+ * Claude encodes `/Users/foo/project` as `-Users-foo-project`.
+ */
+function decodeClaudePath(encoded: string): string {
+  return encoded.replace(/^-/, '/').replace(/-/g, '/');
+}
+
+function encodeClaudePath(fsPath: string): string {
+  return fsPath.replace(/\//g, '-');
+}
+
+/**
+ * List all Claude Code sessions across all projects.
+ */
+export function listClaudeSessions(limit = 20): Session[] {
+  if (!existsSync(CLAUDE_PROJECTS_DIR)) return [];
+
+  const sessions: Session[] = [];
+  try {
+    const projectDirs = readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+
+    for (const projDir of projectDirs) {
+      const projPath = join(CLAUDE_PROJECTS_DIR, projDir.name);
+      const cwd = decodeClaudePath(projDir.name);
+
+      const files = readdirSync(projPath).filter(f => f.endsWith('.jsonl'));
+      for (const file of files) {
+        const filePath = join(projPath, file);
+        const sid = basename(file, '.jsonl');
+        try {
+          const stat = statSync(filePath);
+          const { lastEvent, complete, summary } = parseClaudeSessionMeta(filePath);
+          sessions.push({
+            id: sid,
+            dir: projPath,
+            mtime: stat.mtimeMs,
+            lastEvent,
+            premiumRequests: 0,
+            summary,
+            cwd,
+            complete,
+            agent: 'claude',
+          });
+        } catch { /* skip */ }
+      }
+    }
+  } catch { /* skip */ }
+
+  sessions.sort((a, b) => b.mtime - a.mtime);
+  return sessions.slice(0, limit);
+}
+
+function parseClaudeSessionMeta(filePath: string): { lastEvent: string; complete: boolean; summary: string } {
+  try {
+    const content = readFileSync(filePath, 'utf-8').trimEnd();
+    const lines = content.split('\n');
+    let lastEvent = 'unknown';
+    let complete = false;
+    let summary = '';
+
+    // Read last few lines for metadata
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
+      try {
+        const event = JSON.parse(lines[i]);
+        if (i === lines.length - 1) {
+          lastEvent = event.type ?? event.role ?? 'unknown';
+        }
+        // Claude marks completion with result type or specific message patterns
+        if (event.type === 'result' || (event.type === 'assistant' && event.stop_reason === 'end_turn')) {
+          complete = true;
+        }
+      } catch { /* skip */ }
+    }
+
+    // Get summary from first assistant message
+    for (const line of lines.slice(0, 10)) {
+      try {
+        const event = JSON.parse(line);
+        if ((event.type === 'human' || event.role === 'human') && event.message) {
+          summary = typeof event.message === 'string'
+            ? event.message.slice(0, 100)
+            : JSON.stringify(event.message).slice(0, 100);
+          break;
+        }
+      } catch { /* skip */ }
+    }
+
+    return { lastEvent, complete, summary };
+  } catch {
+    return { lastEvent: 'error', complete: false, summary: '' };
+  }
+}
+
+export function getLatestClaudeSessionId(projectDir?: string): string | null {
+  if (!existsSync(CLAUDE_PROJECTS_DIR)) return null;
+
+  let searchDirs: string[];
+  if (projectDir) {
+    const encoded = encodeClaudePath(resolve(projectDir));
+    const projPath = join(CLAUDE_PROJECTS_DIR, encoded);
+    searchDirs = existsSync(projPath) ? [projPath] : [];
+  } else {
+    try {
+      searchDirs = readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => join(CLAUDE_PROJECTS_DIR, d.name));
+    } catch {
+      return null;
+    }
+  }
+
+  let latest: { id: string; mtime: number } | null = null;
+  for (const dir of searchDirs) {
+    try {
+      const files = readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+      for (const file of files) {
+        const stat = statSync(join(dir, file));
+        if (!latest || stat.mtimeMs > latest.mtime) {
+          latest = { id: basename(file, '.jsonl'), mtime: stat.mtimeMs };
+        }
+      }
+    } catch { /* skip */ }
+  }
+  return latest?.id ?? null;
+}
+
+export function getClaudeSessionCwd(sid: string): string {
+  if (!existsSync(CLAUDE_PROJECTS_DIR)) return '';
+  try {
+    const projectDirs = readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+    for (const projDir of projectDirs) {
+      const filePath = join(CLAUDE_PROJECTS_DIR, projDir.name, `${sid}.jsonl`);
+      if (existsSync(filePath)) {
+        return decodeClaudePath(projDir.name);
+      }
+    }
+  } catch { /* skip */ }
+  return '';
+}
+
+export function getClaudeSessionReport(sid: string): SessionReport | null {
+  if (!existsSync(CLAUDE_PROJECTS_DIR)) return null;
+
+  // Find session file
+  let filePath: string | null = null;
+  let cwd = '';
+  try {
+    const projectDirs = readdirSync(CLAUDE_PROJECTS_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+    for (const projDir of projectDirs) {
+      const candidate = join(CLAUDE_PROJECTS_DIR, projDir.name, `${sid}.jsonl`);
+      if (existsSync(candidate)) {
+        filePath = candidate;
+        cwd = decodeClaudePath(projDir.name);
+        break;
+      }
+    }
+  } catch { /* skip */ }
+
+  if (!filePath) return null;
+
+  let lines: string[];
+  try {
+    lines = readFileSync(filePath, 'utf-8').trimEnd().split('\n');
+  } catch {
+    return null;
+  }
+
+  const report: SessionReport = {
+    id: sid, cwd, summary: '', startTime: '', endTime: '',
+    durationMs: 0, complete: false, userMessages: 0, assistantTurns: 0,
+    outputTokens: 0, premiumRequests: 0, toolUsage: {}, gitCommits: [],
+    filesCreated: [], filesEdited: [], errors: [], taskCompletions: [],
+    agent: 'claude',
+  };
+
+  for (const line of lines) {
+    let event: Record<string, unknown>;
+    try { event = JSON.parse(line); } catch { continue; }
+
+    const type = (event.type ?? event.role ?? '') as string;
+    const ts = event.timestamp as string | undefined;
+
+    if (ts && !report.startTime) report.startTime = ts;
+    if (ts) report.endTime = ts;
+
+    // Claude JSONL uses 'human'/'assistant'/'tool_use'/'tool_result' types
+    if (type === 'human' || type === 'user') {
+      report.userMessages++;
+      if (!report.summary) {
+        const msg = event.message ?? event.content;
+        report.summary = (typeof msg === 'string' ? msg : JSON.stringify(msg ?? '')).slice(0, 100);
+      }
+    }
+
+    if (type === 'assistant') {
+      report.assistantTurns++;
+      const usage = event.usage as Record<string, number> | undefined;
+      if (usage?.output_tokens) report.outputTokens += usage.output_tokens;
+      if (event.stop_reason === 'end_turn') report.complete = true;
+    }
+
+    if (type === 'tool_use') {
+      const toolName = (event.name ?? event.tool ?? 'unknown') as string;
+      report.toolUsage[toolName] = (report.toolUsage[toolName] ?? 0) + 1;
+
+      // Track git commits from Bash tool
+      if (toolName === 'Bash' || toolName === 'bash') {
+        const input = (event.input ?? '') as string;
+        const cmd = typeof input === 'string' ? input : (input as Record<string, string>)?.command ?? '';
+        if (cmd.includes('git') && cmd.includes('commit') && cmd.includes('-m')) {
+          const msgMatch = cmd.match(/-m\s+"([^"]{1,120})/);
+          if (msgMatch) report.gitCommits.push(msgMatch[1]);
+        }
+      }
+      // Track file operations
+      if (toolName === 'Write' || toolName === 'Create') {
+        const path = (event.input as Record<string, string>)?.file_path
+          ?? (event.input as Record<string, string>)?.path;
+        if (path) report.filesCreated.push(path);
+      }
+      if (toolName === 'Edit') {
+        const path = (event.input as Record<string, string>)?.file_path
+          ?? (event.input as Record<string, string>)?.path;
+        if (path && !report.filesEdited.includes(path)) report.filesEdited.push(path);
+      }
+    }
+
+    if (type === 'result') {
+      report.complete = true;
+      const result = (event.result ?? event.content ?? '') as string;
+      if (result) report.taskCompletions.push(typeof result === 'string' ? result.slice(0, 200) : '(completed)');
+    }
+
+    if (type === 'error') {
+      const msg = (event.error ?? event.message ?? 'unknown error') as string;
+      report.errors.push(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+  }
+
+  if (report.startTime && report.endTime) {
+    report.durationMs = new Date(report.endTime).getTime() - new Date(report.startTime).getTime();
+  }
+
+  return report;
+}
+
+// ─── Unified session functions ───
+
+/**
+ * List sessions from both Copilot and Claude Code, merged and sorted by time.
+ */
+export function listAllSessions(limit = 20, agentFilter?: AgentType): Session[] {
+  const copilot = agentFilter === 'claude' ? [] : listSessions(limit);
+  const claude = agentFilter === 'copilot' ? [] : listClaudeSessions(limit);
+  const all = [...copilot, ...claude];
+  all.sort((a, b) => b.mtime - a.mtime);
+  return all.slice(0, limit);
+}
+
+export function getAgentSessionReport(sid: string, agent?: AgentType): SessionReport | null {
+  if (agent === 'claude') return getClaudeSessionReport(sid);
+  if (agent === 'copilot') return getSessionReport(sid);
+  // Auto-detect: try copilot first, then claude
+  return getSessionReport(sid) ?? getClaudeSessionReport(sid);
+}
+
+export function findLatestIncompleteForAgent(agent?: AgentType): { id: string; agent: AgentType } | null {
+  const sessions = listAllSessions(50, agent);
+  for (const s of sessions) {
+    if (!s.complete) return { id: s.id, agent: s.agent };
+  }
+  return null;
 }

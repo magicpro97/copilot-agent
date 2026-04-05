@@ -3,7 +3,8 @@ import { existsSync, copyFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { detectProjectType, detectProjectName } from '../lib/detect.js';
-import { runCopilotTask, assertCopilot } from '../lib/process.js';
+import { runAgentTask } from '../lib/process.js';
+import { resolveAgent, assertAgent } from '../lib/provider.js';
 import { withLock } from '../lib/lock.js';
 import { log, ok, warn, fail, info, notify } from '../lib/logger.js';
 import { CYAN, RESET } from '../lib/colors.js';
@@ -13,10 +14,13 @@ export function registerResearchCommand(program: Command): void {
     .command('research [project]')
     .description('Research improvements or a specific topic')
     .option('-s, --steps <n>', 'Max autopilot continues', '50')
+    .option('-a, --agent <type>', 'Agent to use: copilot or claude')
     .action(async (project: string | undefined, opts) => {
       try {
+        const agent = resolveAgent(opts.agent);
         await researchCommand(project ?? process.cwd(), {
           steps: parseInt(opts.steps, 10),
+          agent,
         });
       } catch (err) {
         fail(`Research error: ${err instanceof Error ? err.message : err}`);
@@ -27,6 +31,7 @@ export function registerResearchCommand(program: Command): void {
 
 interface ResearchOptions {
   steps: number;
+  agent: ReturnType<typeof resolveAgent>;
 }
 
 function buildResearchPrompt(projectType: string, projectName: string): string {
@@ -51,18 +56,18 @@ Write RESEARCH-PROPOSALS.md in the project root.`;
 }
 
 async function researchCommand(dir: string, opts: ResearchOptions): Promise<void> {
-  assertCopilot();
+  assertAgent(opts.agent);
 
   const projectDir = resolve(dir);
   const projectType = detectProjectType(projectDir);
   const projectName = detectProjectName(projectDir);
 
-  info(`Researching: ${CYAN}${projectName}${RESET} (${projectType})`);
+  info(`Researching: ${CYAN}${projectName}${RESET} (${projectType}) — agent: ${opts.agent}`);
 
   const prompt = buildResearchPrompt(projectType, projectName);
 
   const result = await withLock('copilot-research', () =>
-    runCopilotTask(prompt, opts.steps, projectDir),
+    runAgentTask(opts.agent, prompt, opts.steps, projectDir),
   );
 
   log(`Copilot exited with code ${result.exitCode}`);
