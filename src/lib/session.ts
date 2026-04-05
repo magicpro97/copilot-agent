@@ -18,6 +18,26 @@ export interface Session {
   complete: boolean;
 }
 
+export interface SessionReport {
+  id: string;
+  cwd: string;
+  summary: string;
+  startTime: string;
+  endTime: string;
+  durationMs: number;
+  complete: boolean;
+  userMessages: number;
+  assistantTurns: number;
+  outputTokens: number;
+  premiumRequests: number;
+  toolUsage: Record<string, number>;
+  gitCommits: string[];
+  filesCreated: string[];
+  filesEdited: string[];
+  errors: string[];
+  taskCompletions: string[];
+}
+
 const SESSION_DIR = join(homedir(), '.copilot', 'session-state');
 
 export function getSessionDir(): string {
@@ -168,4 +188,118 @@ export function findLatestIncomplete(): string | null {
     if (!s.complete) return s.id;
   }
   return null;
+}
+
+export function getSessionReport(sid: string): SessionReport | null {
+  if (!validateSession(sid)) return null;
+
+  const ws = readWorkspace(sid);
+  let lines: string[];
+  try {
+    lines = readFileSync(join(SESSION_DIR, sid, 'events.jsonl'), 'utf-8')
+      .trimEnd()
+      .split('\n');
+  } catch {
+    return null;
+  }
+
+  const report: SessionReport = {
+    id: sid,
+    cwd: ws.cwd ?? '',
+    summary: ws.summary ?? '',
+    startTime: '',
+    endTime: '',
+    durationMs: 0,
+    complete: false,
+    userMessages: 0,
+    assistantTurns: 0,
+    outputTokens: 0,
+    premiumRequests: 0,
+    toolUsage: {},
+    gitCommits: [],
+    filesCreated: [],
+    filesEdited: [],
+    errors: [],
+    taskCompletions: [],
+  };
+
+  for (const line of lines) {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const type = event.type as string;
+    const ts = event.timestamp as string | undefined;
+    const data = (event.data ?? {}) as Record<string, unknown>;
+
+    if (ts && !report.startTime) report.startTime = ts;
+    if (ts) report.endTime = ts;
+
+    switch (type) {
+      case 'user.message':
+        report.userMessages++;
+        break;
+
+      case 'assistant.message':
+        report.assistantTurns++;
+        report.outputTokens += (data.outputTokens as number) ?? 0;
+        break;
+
+      case 'tool.execution_start': {
+        const toolName = data.toolName as string;
+        if (toolName) {
+          report.toolUsage[toolName] = (report.toolUsage[toolName] ?? 0) + 1;
+        }
+        // Track git commits
+        if (toolName === 'bash') {
+          const args = data.arguments as Record<string, string> | undefined;
+          const cmd = args?.command ?? '';
+          if (cmd.includes('git') && cmd.includes('commit') && cmd.includes('-m')) {
+            const msgMatch = cmd.match(/-m\s+"([^"]{1,120})/);
+            if (msgMatch) report.gitCommits.push(msgMatch[1]);
+          }
+        }
+        // Track file creates/edits
+        if (toolName === 'create') {
+          const args = data.arguments as Record<string, string> | undefined;
+          if (args?.path) report.filesCreated.push(args.path);
+        }
+        if (toolName === 'edit') {
+          const args = data.arguments as Record<string, string> | undefined;
+          if (args?.path && !report.filesEdited.includes(args.path)) {
+            report.filesEdited.push(args.path);
+          }
+        }
+        break;
+      }
+
+      case 'session.task_complete': {
+        const summary = data.summary as string | undefined;
+        report.taskCompletions.push(summary ?? '(task completed)');
+        report.complete = true;
+        break;
+      }
+
+      case 'session.error': {
+        const msg = data.message as string | undefined;
+        if (msg) report.errors.push(msg);
+        break;
+      }
+
+      case 'session.shutdown': {
+        const premium = data.totalPremiumRequests as number | undefined;
+        if (premium != null) report.premiumRequests = premium;
+        break;
+      }
+    }
+  }
+
+  if (report.startTime && report.endTime) {
+    report.durationMs = new Date(report.endTime).getTime() - new Date(report.startTime).getTime();
+  }
+
+  return report;
 }
