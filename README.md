@@ -17,6 +17,8 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`config`** | Persistent configuration defaults (global + per-project) |
 | **`proxy`** | Manage copilot-api proxy for Claude Code via Copilot |
 | **`diff`** | Show git changes made by an agent session |
+| **`quota`** | Track premium requests, tokens, and usage over time |
+| **`compact`** | Generate context summary for session handoff/resume |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -135,9 +137,32 @@ copilot-agent proxy start
 
 # Check status (PID, port, token, model count)
 copilot-agent proxy status
+```
 
-# Stop proxy
-copilot-agent proxy stop
+### Usage tracking
+
+```bash
+# Show last 7 days of premium/token usage
+copilot-agent quota
+
+# All-time usage
+copilot-agent quota --all
+
+# Last 30 days
+copilot-agent quota --days 30
+```
+
+### Context handoff (compact)
+
+```bash
+# Generate context summary from latest session
+copilot-agent compact
+
+# Save compact to file
+copilot-agent compact --save
+
+# Get a resume prompt to continue the work
+copilot-agent compact --resume-prompt
 ```
 
 ## How it works
