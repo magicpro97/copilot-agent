@@ -200,6 +200,70 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
   let selectedIdx = 0;
   let focusedPanel: 'sessions' | 'detail' = 'sessions';
   let lastDetailId = '';
+  let detailDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  // ── Quick preview from Session metadata (no file I/O) ──────────
+  function showQuickPreview(s: Session): void {
+    const project = s.cwd?.split('/').pop() || s.id.slice(0, 12);
+    const agent = s.agent === 'claude' ? '{yellow-fg}claude{/}' : '{cyan-fg}copilot{/}';
+    const status = s.complete ? '{green-fg}✔ complete{/}' : '{yellow-fg}⏳ incomplete{/}';
+    const lines = [
+      `{bold}${project}{/}  ${agent}`,
+      `{gray-fg}${s.id}{/}`,
+      '',
+      ` Status     ${status}`,
+      ` Premium    {yellow-fg}${s.premiumRequests}{/}`,
+      ` Activity   ${fmtTimeAgo(s.mtime)}`,
+      ` Directory  {gray-fg}${s.cwd || '—'}{/}`,
+      '',
+      '{gray-fg}Loading full report…{/}',
+    ];
+    detailBox.setContent(lines.join('\n'));
+    detailBox.setLabel(` {cyan-fg}{bold}Detail — ${s.id.slice(0, 12)}…{/} `);
+  }
+
+  // ── Debounced detail render (expensive — JSONL parse) ──────────
+  function scheduleDetailRender(force = false): void {
+    if (detailDebounce) clearTimeout(detailDebounce);
+
+    if (sessions.length === 0 || selectedIdx < 0 || selectedIdx >= sessions.length) {
+      detailBox.setContent('{gray-fg}No session selected{/}');
+      lastDetailId = '';
+      return;
+    }
+
+    const s = sessions[selectedIdx];
+
+    // If already cached, render immediately (no I/O)
+    const cached = cache.details.get(s.id);
+    if (!force && cached && Date.now() - cached.ts < 10_000 && cached.report) {
+      lastDetailId = s.id;
+      detailBox.setContent(detailContent(cached.report));
+      detailBox.setLabel(` {cyan-fg}{bold}Detail — ${s.id.slice(0, 12)}…{/} `);
+      return;
+    }
+
+    // Show quick preview instantly (zero I/O)
+    if (s.id !== lastDetailId) {
+      showQuickPreview(s);
+    }
+
+    // Defer the expensive JSONL parse until user stops navigating
+    detailDebounce = setTimeout(() => {
+      detailDebounce = null;
+      if (selectedIdx < 0 || selectedIdx >= sessions.length) return;
+      const current = sessions[selectedIdx];
+      lastDetailId = current.id;
+      const report = cacheDetail(cache, current);
+      if (report) {
+        detailBox.setContent(detailContent(report));
+        detailBox.setLabel(` {cyan-fg}{bold}Detail — ${current.id.slice(0, 12)}…{/} `);
+      } else {
+        detailBox.setContent(`{gray-fg}No report data for ${current.id.slice(0, 8)}…{/}`);
+      }
+      screen.render();
+    }, 150);
+  }
 
   // ── Render header (cheap — only string formatting) ─────────────
   function renderHeader(): void {
@@ -231,27 +295,6 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     sessionList.setLabel(` {cyan-fg}{bold}Sessions (${sessions.length}){/} `);
   }
 
-  // ── Render detail (LAZY — only re-parse when selection changes) ─
-  function renderDetail(force = false): void {
-    if (sessions.length === 0 || selectedIdx < 0 || selectedIdx >= sessions.length) {
-      detailBox.setContent('{gray-fg}No session selected{/}');
-      lastDetailId = '';
-      return;
-    }
-    const s = sessions[selectedIdx];
-    // Skip if same session and not forced
-    if (!force && s.id === lastDetailId) return;
-    lastDetailId = s.id;
-
-    const report = cacheDetail(cache, s);
-    if (report) {
-      detailBox.setContent(detailContent(report));
-      detailBox.setLabel(` {cyan-fg}{bold}Detail — ${s.id.slice(0, 12)}…{/} `);
-    } else {
-      detailBox.setContent(`{gray-fg}Could not load report for ${s.id.slice(0, 8)}…{/}`);
-    }
-  }
-
   // ── Full render (uses cache — fast!) ───────────────────────────
   function render(): void {
     sessions = cacheSessions(cache, limit);
@@ -259,7 +302,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     renderHeader();
     renderProcesses();
     renderSessions();
-    renderDetail();
+    scheduleDetailRender();
     screen.render();
   }
 
@@ -274,6 +317,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
 
   // ── Keyboard ───────────────────────────────────────────────────
   screen.key(['q', 'C-c'], () => {
+    if (detailDebounce) clearTimeout(detailDebounce);
     screen.destroy();
     process.exit(0);
   });
@@ -297,7 +341,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
 
   sessionList.on('select item', (_item: any, index: number) => {
     selectedIdx = index;
-    renderDetail();
+    scheduleDetailRender();
     screen.render();
   });
 
@@ -305,7 +349,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     if (selectedIdx > 0) {
       selectedIdx--;
       sessionList.select(selectedIdx);
-      renderDetail();
+      scheduleDetailRender();
       screen.render();
     }
   });
@@ -314,13 +358,13 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     if (selectedIdx < sessions.length - 1) {
       selectedIdx++;
       sessionList.select(selectedIdx);
-      renderDetail();
+      scheduleDetailRender();
       screen.render();
     }
   });
 
   sessionList.key(['enter'], () => {
-    renderDetail(true); // force re-parse for fresh data
+    scheduleDetailRender(true); // force re-parse for fresh data
     focusedPanel = 'detail';
     detailBox.focus();
     sessionList.style.border.fg = BORDER_COLOR;
