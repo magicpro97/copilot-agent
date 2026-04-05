@@ -21,6 +21,8 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`compact`** | Generate context summary for session handoff/resume |
 | **`hooks`** | Event-driven automation (on_task_complete, on_error, etc.) |
 | **`pr`** | Auto-create GitHub Pull Request from session changes |
+| **`log`** | Search, timeline, and export session history |
+| **`template`** | Manage custom task templates (add/list/remove/import/export) |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -107,11 +109,11 @@ copilot-agent diff abc12345-... --stat
 ### Dashboards
 
 ```bash
-# htop-style TUI (blessed — scrollable, keyboard nav)
+# htop-style TUI (blessed — scrollable, keyboard nav, cached rendering)
 copilot-agent dashboard
 
-# Simple ANSI fallback (no dependencies)
-copilot-agent dashboard --simple
+# Custom refresh interval
+copilot-agent dashboard --refresh 3
 
 # Web UI (Hono + htmx, opens browser)
 copilot-agent web
@@ -202,6 +204,37 @@ copilot-agent pr --dry-run
 
 # Create ready (non-draft) PR
 copilot-agent pr --no-draft
+```
+
+### Session log (search & export)
+
+```bash
+# Search sessions by keyword
+copilot-agent log search "auth" --limit 10
+
+# View session timeline
+copilot-agent log timeline <session-id>
+
+# Export history as JSON or CSV
+copilot-agent log export --format json --output sessions.json
+copilot-agent log export --format csv --limit 50
+```
+
+### Task templates
+
+```bash
+# List custom templates
+copilot-agent template list
+
+# Add a reusable task template
+copilot-agent template add security-audit --prompt "Run a full security audit"
+
+# Remove a template
+copilot-agent template remove security-audit
+
+# Export/import templates (YAML)
+copilot-agent template export > my-templates.yaml
+copilot-agent template import team-templates.yaml
 ```
 
 ## How it works

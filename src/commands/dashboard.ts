@@ -1,10 +1,10 @@
 import type { Command } from 'commander';
 import { listAllSessions, getAgentSessionReport, type SessionReport, type Session } from '../lib/session.js';
-import { findAgentProcesses, type CopilotProcess } from '../lib/process.js';
-import { BOLD, CYAN, DIM, GREEN, YELLOW, RED, RESET } from '../lib/colors.js';
+import { findAgentProcesses } from '../lib/process.js';
 import {
   agentLabel, statusIcon, fmtDuration, fmtTimeAgo, fmtNumber,
   textBar, sessionRow, processRow, detailContent, headerStats,
+  toolBars,
   type ProcessInfo,
 } from '../tui/widgets.js';
 
@@ -22,15 +22,61 @@ export function registerDashboardCommand(program: Command): void {
     .description('Real-time terminal dashboard for copilot sessions (htop-style)')
     .option('-r, --refresh <n>', 'Refresh interval in seconds', '5')
     .option('-l, --limit <n>', 'Number of sessions to show', '20')
-    .option('--simple', 'Use simple ANSI dashboard (no blessed)')
     .action(async (opts) => {
-      if (opts.simple) {
-        runSimpleDashboard(parseInt(opts.refresh, 10), parseInt(opts.limit, 10));
-      } else {
-        await loadBlessed();
-        runBlessedDashboard(parseInt(opts.refresh, 10), parseInt(opts.limit, 10));
-      }
+      await loadBlessed();
+      runBlessedDashboard(parseInt(opts.refresh, 10), parseInt(opts.limit, 10));
     });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PERFORMANCE CACHE — avoid re-parsing files on every render
+// ══════════════════════════════════════════════════════════════════
+
+interface DataCache {
+  sessions: Session[];
+  sessionsTs: number;
+  procs: ProcessInfo[];
+  procsTs: number;
+  details: Map<string, { report: SessionReport | null; ts: number }>;
+}
+
+function createCache(): DataCache {
+  return { sessions: [], sessionsTs: 0, procs: [], procsTs: 0, details: new Map() };
+}
+
+/** Refresh session list (min 2s between refreshes) */
+function cacheSessions(cache: DataCache, limit: number): Session[] {
+  const now = Date.now();
+  if (now - cache.sessionsTs > 2000) {
+    try { cache.sessions = listAllSessions(limit); } catch { /* keep stale */ }
+    cache.sessionsTs = now;
+  }
+  return cache.sessions;
+}
+
+/** Refresh process list (min 3s between refreshes — ps+lsof is expensive) */
+function cacheProcs(cache: DataCache): ProcessInfo[] {
+  const now = Date.now();
+  if (now - cache.procsTs > 3000) {
+    try { cache.procs = findAgentProcesses() as ProcessInfo[]; } catch { /* keep stale */ }
+    cache.procsTs = now;
+  }
+  return cache.procs;
+}
+
+/** Get session detail report (cached 10s, only parsed on demand) */
+function cacheDetail(cache: DataCache, s: Session): SessionReport | null {
+  const entry = cache.details.get(s.id);
+  if (entry && Date.now() - entry.ts < 10_000) return entry.report;
+  let report: SessionReport | null = null;
+  try { report = getAgentSessionReport(s.id, s.agent); } catch { /* null */ }
+  cache.details.set(s.id, { report, ts: Date.now() });
+  // Evict old entries
+  if (cache.details.size > 15) {
+    const oldest = [...cache.details.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+    if (oldest) cache.details.delete(oldest[0]);
+  }
+  return report;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -38,6 +84,8 @@ export function registerDashboardCommand(program: Command): void {
 // ══════════════════════════════════════════════════════════════════
 
 function runBlessedDashboard(refreshSec: number, limit: number): void {
+  const cache = createCache();
+
   const screen = blessed.screen({
     smartCSR: true,
     title: 'copilot-agent dashboard',
@@ -141,18 +189,9 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
   let procs: ProcessInfo[] = [];
   let selectedIdx = 0;
   let focusedPanel: 'sessions' | 'detail' = 'sessions';
+  let lastDetailId = '';
 
-  // ── Data refresh ───────────────────────────────────────────────
-  function refreshData(): void {
-    try {
-      procs = findAgentProcesses() as ProcessInfo[];
-      sessions = listAllSessions(limit);
-    } catch {
-      // ignore errors during refresh
-    }
-  }
-
-  // ── Render header ──────────────────────────────────────────────
+  // ── Render header (cheap — only string formatting) ─────────────
   function renderHeader(): void {
     const time = new Date().toLocaleTimeString('en-GB');
     const totalPremium = sessions.reduce((s, x) => s + x.premiumRequests, 0);
@@ -161,7 +200,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     headerBox.setContent(` {bold}{cyan-fg}⚡ copilot-agent{/}  ${stats}  {gray-fg}${time}{/}`);
   }
 
-  // ── Render processes ───────────────────────────────────────────
+  // ── Render processes (cheap — just formatting cached data) ─────
   function renderProcesses(): void {
     if (procs.length === 0) {
       processBox.setContent(' {gray-fg}No agent processes running{/}');
@@ -172,7 +211,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     processBox.setContent(`{gray-fg}${header}{/}\n${rows.join('\n')}`);
   }
 
-  // ── Render session list ────────────────────────────────────────
+  // ── Render session list (cheap — just formatting cached data) ──
   function renderSessions(): void {
     const items = sessions.map(s => sessionRow(s));
     sessionList.setItems(items);
@@ -182,34 +221,45 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     sessionList.setLabel(` {cyan-fg}{bold}Sessions (${sessions.length}){/} `);
   }
 
-  // ── Render detail panel ────────────────────────────────────────
-  function renderDetail(): void {
+  // ── Render detail (LAZY — only re-parse when selection changes) ─
+  function renderDetail(force = false): void {
     if (sessions.length === 0 || selectedIdx < 0 || selectedIdx >= sessions.length) {
       detailBox.setContent('{gray-fg}No session selected{/}');
+      lastDetailId = '';
       return;
     }
     const s = sessions[selectedIdx];
-    try {
-      const report = getAgentSessionReport(s.id, s.agent);
-      if (report) {
-        detailBox.setContent(detailContent(report));
-        detailBox.setLabel(` {cyan-fg}{bold}Detail — ${s.id.slice(0, 12)}…{/} `);
-      } else {
-        detailBox.setContent(`{gray-fg}Could not load report for ${s.id.slice(0, 8)}…{/}`);
-      }
-    } catch {
-      detailBox.setContent('{red-fg}Error loading session detail{/}');
+    // Skip if same session and not forced
+    if (!force && s.id === lastDetailId) return;
+    lastDetailId = s.id;
+
+    const report = cacheDetail(cache, s);
+    if (report) {
+      detailBox.setContent(detailContent(report));
+      detailBox.setLabel(` {cyan-fg}{bold}Detail — ${s.id.slice(0, 12)}…{/} `);
+    } else {
+      detailBox.setContent(`{gray-fg}Could not load report for ${s.id.slice(0, 8)}…{/}`);
     }
   }
 
-  // ── Full render ────────────────────────────────────────────────
+  // ── Full render (uses cache — fast!) ───────────────────────────
   function render(): void {
-    refreshData();
+    sessions = cacheSessions(cache, limit);
+    procs = cacheProcs(cache);
     renderHeader();
     renderProcesses();
     renderSessions();
     renderDetail();
     screen.render();
+  }
+
+  // ── Force refresh (invalidate cache) ───────────────────────────
+  function forceRefresh(): void {
+    cache.sessionsTs = 0;
+    cache.procsTs = 0;
+    cache.details.clear();
+    lastDetailId = '';
+    render();
   }
 
   // ── Keyboard ───────────────────────────────────────────────────
@@ -218,7 +268,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
     process.exit(0);
   });
 
-  screen.key(['r'], () => render());
+  screen.key(['r'], () => forceRefresh());
 
   screen.key(['tab'], () => {
     if (focusedPanel === 'sessions') {
@@ -260,7 +310,7 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
   });
 
   sessionList.key(['enter'], () => {
-    renderDetail();
+    renderDetail(true); // force re-parse for fresh data
     focusedPanel = 'detail';
     detailBox.focus();
     sessionList.style.border.fg = BORDER_COLOR;
@@ -276,101 +326,4 @@ function runBlessedDashboard(refreshSec: number, limit: number): void {
   // Auto-refresh timer
   const timer = setInterval(render, refreshSec * 1000);
   screen.on('destroy', () => clearInterval(timer));
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SIMPLE ANSI DASHBOARD (fallback with --simple)
-// ══════════════════════════════════════════════════════════════════
-
-const ESC = '\x1b';
-const CLEAR = `${ESC}[2J${ESC}[H`;
-const HIDE_CURSOR = `${ESC}[?25l`;
-const SHOW_CURSOR = `${ESC}[?25h`;
-
-function runSimpleDashboard(refreshSec: number, limit: number): void {
-  process.stdout.write(HIDE_CURSOR);
-
-  const cleanup = () => {
-    process.stdout.write(SHOW_CURSOR);
-    process.stdout.write(CLEAR);
-    process.exit(0);
-  };
-
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
-
-  const render = () => {
-    try {
-      const output = buildSimpleScreen(limit);
-      process.stdout.write(CLEAR + output);
-    } catch {
-      // ignore render errors
-    }
-  };
-
-  render();
-  setInterval(render, refreshSec * 1000);
-
-  process.stdout.on('resize', render);
-  process.stdin.setRawMode?.(true);
-  process.stdin.resume();
-  process.stdin.on('data', (data: Buffer) => {
-    const key = data.toString();
-    if (key === 'q' || key === '\x03') cleanup();
-    if (key === 'r') render();
-  });
-}
-
-function buildSimpleScreen(limit: number): string {
-  const cols = process.stdout.columns || 80;
-  const lines: string[] = [];
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-GB');
-
-  lines.push('');
-  lines.push(`  ${BOLD}${CYAN}┌${'─'.repeat(cols - 6)}┐${RESET}`);
-  lines.push(`  ${BOLD}${CYAN}│${RESET}  ⚡ ${BOLD}Copilot Agent Dashboard${RESET}${' '.repeat(Math.max(0, cols - 37 - timeStr.length))}${DIM}${timeStr}${RESET}  ${BOLD}${CYAN}│${RESET}`);
-  lines.push(`  ${BOLD}${CYAN}└${'─'.repeat(cols - 6)}┘${RESET}`);
-  lines.push('');
-
-  const procs = findAgentProcesses();
-  lines.push(`  ${BOLD}${GREEN}● Active Processes (${procs.length})${RESET}`);
-  lines.push(`  ${'─'.repeat(Math.min(cols - 4, 70))}`);
-
-  if (procs.length === 0) {
-    lines.push(`  ${DIM}No agent processes running${RESET}`);
-  } else {
-    for (const p of procs) {
-      const agentTag = p.agent === 'claude' ? `${YELLOW}[claude]${RESET}` : `${CYAN}[copilot]${RESET}`;
-      const sid = p.sessionId ? p.sessionId.slice(0, 8) + '…' : '—';
-      const cwdShort = p.cwd ? '~/' + p.cwd.split('/').slice(-2).join('/') : '—';
-      lines.push(`  ${GREEN}⬤${RESET} ${agentTag} PID ${BOLD}${p.pid}${RESET}  ${CYAN}${sid}${RESET}  ${DIM}${cwdShort}${RESET}`);
-    }
-  }
-  lines.push('');
-
-  const sessions = listAllSessions(limit);
-  lines.push(`  ${BOLD}${CYAN}● Recent Sessions (${sessions.length})${RESET}`);
-  lines.push(`  ${'─'.repeat(Math.min(cols - 4, 70))}`);
-
-  const hdr = [pad('Status', 10), pad('Agent', 8), pad('Premium', 8), pad('Project', 18), pad('Last Activity', 14)];
-  lines.push(`  ${DIM}${hdr.join(' ')}${RESET}`);
-
-  for (const s of sessions) {
-    const icon = s.complete ? `${GREEN}✔ done  ${RESET}` : `${YELLOW}⏸ stop  ${RESET}`;
-    const agent = s.agent === 'claude' ? `${YELLOW}claude ${RESET}` : `${CYAN}copilot${RESET}`;
-    const prem = pad(String(s.premiumRequests), 8);
-    const proj = pad(s.cwd.split('/').pop() ?? '—', 18);
-    const ago = pad(fmtTimeAgo(s.mtime), 14);
-    lines.push(`  ${icon}${agent} ${prem}${proj}${ago}`);
-  }
-  lines.push('');
-  lines.push(`  ${DIM}Press ${BOLD}q${RESET}${DIM} to quit, ${BOLD}r${RESET}${DIM} to refresh${RESET}`);
-
-  return lines.join('\n');
-}
-
-function pad(s: string, n: number): string {
-  if (s.length >= n) return s.slice(0, n);
-  return s + ' '.repeat(n - s.length);
 }

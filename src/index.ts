@@ -14,12 +14,14 @@ import { registerQuotaCommand } from './commands/quota.js';
 import { registerCompactCommand } from './commands/compact.js';
 import { registerHooksCommand } from './commands/hooks.js';
 import { registerPrCommand } from './commands/pr.js';
+import { registerTemplateCommand } from './commands/template.js';
+import { registerLogCommand } from './commands/log.js';
 
 const program = new Command();
 
 program
   .name('copilot-agent')
-  .version('0.11.0')
+  .version('0.12.0')
   .description('Autonomous AI agent manager — auto-resume, task discovery, overnight runs. Supports GitHub Copilot CLI + Claude Code.');
 
 registerStatusCommand(program);
@@ -37,5 +39,7 @@ registerQuotaCommand(program);
 registerCompactCommand(program);
 registerHooksCommand(program);
 registerPrCommand(program);
+registerLogCommand(program);
+registerTemplateCommand(program);
 
 program.parse();
