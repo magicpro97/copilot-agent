@@ -63,18 +63,20 @@ export function renderStats(sessions: SessionReport[]): string {
 
 // ─── Process List ──────────────────────────────────────────
 export function renderProcesses(procs: CopilotProcess[]): string {
-  if (procs.length === 0) return '<div class="empty">No active agent processes</div>';
+  if (procs.length === 0) return '<div class="empty">No active agent processes detected</div>';
   return procs.map(p => {
-    const sid = p.sessionId ? p.sessionId.slice(0, 8) + '…' : '—';
+    const sid = p.sessionId ? p.sessionId.slice(0, 8) + '…' : '';
     const agentBadge = p.agent === 'claude'
       ? '<span class="badge badge-claude">claude</span>'
       : '<span class="badge badge-copilot">copilot</span>';
+    const cwdShort = p.cwd ? p.cwd.split('/').pop() ?? p.cwd.split('\\').pop() ?? '' : '';
     return `<div class="proc">
       <div class="proc-dot"></div>
       ${agentBadge}
       <span class="proc-pid">PID ${p.pid}</span>
-      <span class="proc-sid">${esc(sid)}</span>
-      <span class="proc-cwd">${esc(p.cwd ?? '')}</span>
+      ${sid ? `<span class="proc-sid">${esc(sid)}</span>` : ''}
+      ${cwdShort ? `<span class="proc-cwd">${esc(cwdShort)}</span>` : ''}
+      <span class="proc-cmd">${esc(p.command.slice(0, 60))}</span>
     </div>`;
   }).join('');
 }

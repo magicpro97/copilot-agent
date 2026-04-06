@@ -31,10 +31,16 @@ export function assertCopilot(): void {
 export function findAgentProcesses(agentFilter?: AgentType): AgentProcess[] {
   try {
     const isWin = process.platform === 'win32';
-    const cmd = isWin
-      ? 'wmic process get ProcessId,CommandLine /format:csv'
-      : 'ps -eo pid,command';
-    const output = execSync(cmd, { encoding: 'utf-8' });
+    let output: string;
+    if (isWin) {
+      try {
+        output = execSync('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+      } catch {
+        output = execSync('wmic process get ProcessId,CommandLine /format:csv', { encoding: 'utf-8' });
+      }
+    } else {
+      output = execSync('ps -eo pid,command', { encoding: 'utf-8' });
+    }
     const results: AgentProcess[] = [];
     const myPid = process.pid;
     const parentPid = process.ppid;
@@ -47,12 +53,18 @@ export function findAgentProcesses(agentFilter?: AgentType): AgentProcess[] {
       let cmdStr: string;
 
       if (isWin) {
-        const parts = trimmed.split(',');
-        if (parts.length < 3) continue;
-        const pidStr = parts[parts.length - 1].trim();
-        pid = parseInt(pidStr, 10);
-        if (isNaN(pid)) continue;
-        cmdStr = parts.slice(1, -1).join(',').trim();
+        const psMatch = trimmed.match(/^"?(\d+)"?,"?(.+?)"?$/);
+        if (psMatch) {
+          pid = parseInt(psMatch[1], 10);
+          cmdStr = psMatch[2].replace(/^"|"$/g, '');
+        } else {
+          const parts = trimmed.split(',');
+          if (parts.length < 3) continue;
+          const pidStr = parts[parts.length - 1].trim();
+          pid = parseInt(pidStr, 10);
+          if (isNaN(pid)) continue;
+          cmdStr = parts.slice(1, -1).join(',').trim();
+        }
       } else {
         const match = trimmed.match(/^(\d+)\s+(.+)$/);
         if (!match) continue;
@@ -60,7 +72,7 @@ export function findAgentProcesses(agentFilter?: AgentType): AgentProcess[] {
         cmdStr = match[2];
       }
 
-      if (pid === myPid || pid === parentPid) continue;
+      if (isNaN(pid) || pid === myPid || pid === parentPid) continue;
 
       const lower = cmdStr.toLowerCase();
       const isCopilot = (lower.includes('copilot') || lower.includes('@githubnext/copilot'))
@@ -69,7 +81,7 @@ export function findAgentProcesses(agentFilter?: AgentType): AgentProcess[] {
         && !lower.includes('copilot-agent');
 
       if (!isCopilot && !isClaude) continue;
-      if (lower.includes('ps -eo') || lower.includes('grep') || lower.includes('wmic')) continue;
+      if (lower.includes('ps -eo') || lower.includes('grep') || lower.includes('wmic') || lower.includes('get-ciminstance')) continue;
 
       const agent: AgentType = isClaude ? 'claude' : 'copilot';
       if (agentFilter && agent !== agentFilter) continue;

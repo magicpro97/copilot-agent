@@ -156,6 +156,7 @@ function startWebServer(port: number, autoOpen: boolean): void {
       var btn = document.getElementById('sidebar-toggle');
       var grid = document.getElementById('main-grid');
       var sb = document.getElementById('sidebar');
+      var detail = document.getElementById('detail');
       var collapsed = false;
       btn.addEventListener('click', function() {
         collapsed = !collapsed;
@@ -164,11 +165,15 @@ function startWebServer(port: number, autoOpen: boolean): void {
           sb.classList.add('collapsed');
           btn.textContent = '▶';
           btn.title = 'Expand sidebar';
+          btn.classList.add('floating');
+          detail.style.paddingLeft = '40px';
         } else {
           grid.classList.remove('sidebar-collapsed');
           sb.classList.remove('collapsed');
           btn.textContent = '◀';
           btn.title = 'Collapse sidebar';
+          btn.classList.remove('floating');
+          detail.style.paddingLeft = '';
         }
       });
     })();

@@ -176,10 +176,18 @@ export interface ProcessInfo {
 async function findProcessesAsync(): Promise<ProcessInfo[]> {
   try {
     const isWin = process.platform === 'win32';
-    const cmd = isWin
-      ? 'wmic process get ProcessId,CommandLine /format:csv'
-      : 'ps -eo pid,command';
-    const output = await execAsync(cmd);
+    let output: string;
+    if (isWin) {
+      // PowerShell: more reliable than wmic on modern Windows
+      try {
+        output = await execAsync('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Csv -NoTypeInformation"');
+      } catch {
+        // Fallback: wmic (older Windows)
+        output = await execAsync('wmic process get ProcessId,CommandLine /format:csv');
+      }
+    } else {
+      output = await execAsync('ps -eo pid,command');
+    }
     return parseProcessOutput(output, isWin);
   } catch {
     return [];
@@ -199,13 +207,21 @@ function parseProcessOutput(output: string, isWin: boolean): ProcessInfo[] {
     let cmd: string;
 
     if (isWin) {
-      // wmic CSV: Node,CommandLine,ProcessId
-      const parts = trimmed.split(',');
-      if (parts.length < 3) continue;
-      const pidStr = parts[parts.length - 1].trim();
-      pid = parseInt(pidStr, 10);
-      if (isNaN(pid)) continue;
-      cmd = parts.slice(1, -1).join(',').trim();
+      // PowerShell CSV: "ProcessId","CommandLine" or wmic CSV: Node,CommandLine,ProcessId
+      // Try PowerShell format first: "PID","cmd..."
+      const psMatch = trimmed.match(/^"?(\d+)"?,"?(.+?)"?$/);
+      if (psMatch) {
+        pid = parseInt(psMatch[1], 10);
+        cmd = psMatch[2].replace(/^"|"$/g, '');
+      } else {
+        // wmic fallback: Node,CommandLine,ProcessId
+        const parts = trimmed.split(',');
+        if (parts.length < 3) continue;
+        const pidStr = parts[parts.length - 1].trim();
+        pid = parseInt(pidStr, 10);
+        if (isNaN(pid)) continue;
+        cmd = parts.slice(1, -1).join(',').trim();
+      }
     } else {
       const match = trimmed.match(/^(\d+)\s+(.+)$/);
       if (!match) continue;
@@ -213,7 +229,7 @@ function parseProcessOutput(output: string, isWin: boolean): ProcessInfo[] {
       cmd = match[2];
     }
 
-    if (pid === myPid || pid === parentPid) continue;
+    if (isNaN(pid) || pid === myPid || pid === parentPid) continue;
 
     const lower = cmd.toLowerCase();
     const isCopilot = (lower.includes('copilot') || lower.includes('@githubnext/copilot'))
@@ -221,7 +237,7 @@ function parseProcessOutput(output: string, isWin: boolean): ProcessInfo[] {
     const isClaude = lower.includes('claude') && !lower.includes('claude-code')
       && !lower.includes('copilot-agent');
     if (!isCopilot && !isClaude) continue;
-    if (lower.includes('ps -eo') || lower.includes('grep') || lower.includes('wmic')) continue;
+    if (lower.includes('ps -eo') || lower.includes('grep') || lower.includes('wmic') || lower.includes('get-ciminstance')) continue;
 
     const agent: AgentType = isClaude ? 'claude' : 'copilot';
     const sidMatch = agent === 'copilot'
