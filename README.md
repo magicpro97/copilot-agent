@@ -12,8 +12,8 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`overnight`** | Run tasks continuously until a deadline (e.g. 07:00) |
 | **`research`** | Architecture, security, and performance analysis |
 | **`report`** | Session activity report — tools, commits, files, tokens |
-| **`dashboard`** | htop-style TUI dashboard with blessed (scrollable, keyboard nav) |
-| **`web`** | Web dashboard with live updates (Hono + htmx + SSE) |
+| **`dashboard`** | htop-style TUI dashboard with diff viewer (scrollable, keyboard nav) |
+| **`web`** | Web dashboard with live updates, diff view, collapsible sidebar |
 | **`config`** | Persistent configuration defaults (global + per-project) |
 | **`proxy`** | Manage copilot-api proxy for Claude Code via Copilot |
 | **`diff`** | Show git changes made by an agent session |
@@ -26,6 +26,8 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`schedule`** | Cron-like recurring task scheduler with daemon mode |
 | **`multi`** | Multi-project orchestration — parallel runs, status tracking |
 | **`review`** | AI-powered code review of session changes, diffs, or PRs |
+| **`notify`** | Notifications via OS, Telegram, Discord, Slack |
+| **`doctor`** | System health check — verify CLI, config, sessions, proxy |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -121,6 +123,17 @@ copilot-agent dashboard --refresh 3
 # Web UI (Hono + htmx, opens browser)
 copilot-agent web
 ```
+
+**TUI Dashboard keybinds:**
+- `↑↓` Navigate sessions, `Enter` Detail, `Tab` Switch panel
+- `d` Open diff viewer (file list + colored diff)
+- `r` Refresh, `q` Quit
+
+**Web Dashboard features:**
+- Live session updates via SSE
+- Diff viewer with syntax highlighting (diff2html + highlight.js)
+- Collapsible sidebar for more detail space
+- Side-by-side or unified diff modes
 
 ### Configuration
 
@@ -292,6 +305,41 @@ copilot-agent review diff
 copilot-agent review pr 42 --agent claude
 ```
 
+### Notifications
+
+```bash
+# Add OS native notifications (macOS/Windows/Linux — no setup needed)
+copilot-agent notify add os
+
+# Add Telegram bot
+copilot-agent notify add telegram --bot-token BOT_TOKEN --chat-id 123456789
+
+# Add Discord webhook
+copilot-agent notify add discord --webhook https://discord.com/api/webhooks/...
+
+# Add Slack webhook
+copilot-agent notify add slack --webhook https://hooks.slack.com/services/...
+
+# Test all configured providers
+copilot-agent notify test
+
+# View configuration
+copilot-agent notify status
+
+# Configure which events trigger notifications
+copilot-agent notify events --error true --overnight-done true
+```
+
+Notifications auto-fire when `watch` or `overnight` sessions complete/error. Config stored in `~/.copilot-agent/notify.yaml`.
+
+### System health check
+
+```bash
+copilot-agent doctor
+```
+
+Checks Node.js, Git, gh CLI, Copilot CLI, Claude Code, config, session storage, hooks, notifications, and proxy status. Shows ✔/⚠/✗ with actionable messages.
+
 ## How it works
 
 1. **Agent abstraction** — Unified interface for both Copilot CLI and Claude Code
@@ -316,7 +364,7 @@ copilot-agent review pr 42 --agent claude
 ## Requirements
 
 - Node.js ≥ 18
-- macOS or Linux
+- macOS, Linux, or Windows
 - At least one: GitHub Copilot CLI or Claude Code
 
 ## License
