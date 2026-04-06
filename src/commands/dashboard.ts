@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import type { Session, SessionReport } from '../lib/session.js';
+import type { Session, SessionReport, FileChange } from '../lib/session.js';
 import { DashboardStore, type ProcessInfo } from '../lib/reactive.js';
 import {
   agentLabel, statusIcon, fmtDuration, fmtTimeAgo, fmtNumber,
@@ -107,18 +107,53 @@ function runReactiveDashboard(refreshSec: number, limit: number): void {
   });
 
   // ── Footer ─────────────────────────────────────────────────────
-  blessed.box({
+  const footerBox = blessed.box({
     parent: screen,
     bottom: 0, left: 0, width: '100%', height: 3,
     tags: true,
     style: { fg: MUTED, bg: '#161b22', border: { fg: BORDER_COLOR } },
     border: { type: 'line' },
-    content: ' {bold}↑↓{/} Navigate  {bold}Enter{/} Detail  {bold}Tab{/} Switch panel  {bold}r{/} Refresh  {bold}q{/} Quit',
+    content: ' {bold}↑↓{/} Navigate  {bold}Enter{/} Detail  {bold}d{/} Diff  {bold}Tab{/} Switch  {bold}r{/} Refresh  {bold}q{/} Quit',
+  });
+
+  // ── Diff overlay panels (hidden by default) ────────────────────
+  const diffFileList = blessed.list({
+    parent: screen,
+    top: 3, left: 0, width: '35%', bottom: 3,
+    tags: true,
+    label: ' {cyan-fg}{bold}Files Changed{/} ',
+    scrollable: true, keys: false, vi: false, mouse: true,
+    hidden: true,
+    style: {
+      fg: FG, bg: BG,
+      border: { fg: BORDER_COLOR }, label: { fg: ACCENT },
+      selected: { fg: '#ffffff', bg: '#1f6feb', bold: true },
+      item: { fg: FG },
+    },
+    border: { type: 'line' },
+    scrollbar: { ch: '│', style: { fg: ACCENT } },
+  });
+
+  const diffContent = blessed.box({
+    parent: screen,
+    top: 3, left: '35%', width: '65%', bottom: 3,
+    tags: true,
+    label: ' {cyan-fg}{bold}Diff{/} ',
+    scrollable: true, keys: true, vi: true, mouse: true,
+    hidden: true,
+    style: { fg: FG, bg: BG, border: { fg: BORDER_COLOR }, label: { fg: ACCENT } },
+    border: { type: 'line' },
+    scrollbar: { ch: '│', style: { fg: ACCENT } },
+    content: '{gray-fg}Select a file to view diff{/}',
   });
 
   // ── UI State ───────────────────────────────────────────────────
   let selectedIdx = 0;
   let focusedPanel: 'sessions' | 'detail' = 'sessions';
+  let diffMode = false;
+  let diffChanges: FileChange[] = [];
+  let diffFileIdx = 0;
+  let diffFocused: 'files' | 'diff' = 'files';
 
   // ── Render helpers (pure formatting, no I/O) ───────────────────
 
@@ -275,6 +310,159 @@ function runReactiveDashboard(refreshSec: number, limit: number): void {
     sessionList.style.border.fg = BORDER_COLOR;
     detailBox.style.border.fg = ACCENT;
     screen.render();
+  });
+
+  // ── Diff mode helpers ──────────────────────────────────────────
+
+  function formatDiffContent(change: FileChange): string {
+    const lines: string[] = [];
+    const shortPath = change.path.split('/').slice(-3).join('/');
+    const typeLabel = change.type === 'create'
+      ? '{green-fg}{bold}NEW FILE{/}' : '{yellow-fg}{bold}EDITED{/}';
+    lines.push(`${typeLabel}  {gray-fg}${shortPath}{/}`);
+    lines.push('{gray-fg}' + '─'.repeat(60) + '{/}');
+    lines.push('');
+
+    if (change.type === 'create' && change.content) {
+      for (const line of change.content.split('\n').slice(0, 200)) {
+        lines.push(`{green-fg}+{/} ${line}`);
+      }
+      if (change.content.split('\n').length > 200) {
+        lines.push('{gray-fg}… truncated{/}');
+      }
+    } else if (change.type === 'edit') {
+      if (change.oldStr) {
+        for (const line of change.oldStr.split('\n').slice(0, 100)) {
+          lines.push(`{red-fg}-{/} {red-fg}${line}{/}`);
+        }
+      }
+      if (change.oldStr && change.newStr) {
+        lines.push('{gray-fg}' + '┄'.repeat(40) + '{/}');
+      }
+      if (change.newStr) {
+        for (const line of change.newStr.split('\n').slice(0, 100)) {
+          lines.push(`{green-fg}+{/} {green-fg}${line}{/}`);
+        }
+      }
+      if (!change.oldStr && !change.newStr) {
+        lines.push('{gray-fg}(no diff data){/}');
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function enterDiffMode(): void {
+    const s = store.sessions[selectedIdx];
+    if (!s) return;
+    const report = store.details.get(s.id);
+    if (!report || !report.fileChanges || report.fileChanges.length === 0) {
+      detailBox.setContent('{yellow-fg}No file changes in this session{/}');
+      screen.render();
+      return;
+    }
+
+    diffMode = true;
+    diffChanges = report.fileChanges;
+    diffFileIdx = 0;
+    diffFocused = 'files';
+
+    // Hide main panels, show diff panels
+    headerBox.hide();
+    processBox.hide();
+    sessionList.hide();
+    detailBox.hide();
+    diffFileList.show();
+    diffContent.show();
+
+    // Populate file list
+    const items = diffChanges.map((c, i) => {
+      const icon = c.type === 'create' ? '{green-fg}+{/}' : '{yellow-fg}~{/}';
+      const short = c.path.split('/').slice(-2).join('/');
+      return ` ${icon} ${short}`;
+    });
+    diffFileList.setItems(items);
+    diffFileList.select(0);
+    diffFileList.setLabel(` {cyan-fg}{bold}Files (${diffChanges.length}){/} `);
+    diffFileList.style.border.fg = ACCENT;
+    diffContent.style.border.fg = BORDER_COLOR;
+
+    // Show first file diff
+    diffContent.setContent(formatDiffContent(diffChanges[0]));
+    diffContent.setLabel(` {cyan-fg}{bold}Diff{/} `);
+    diffContent.setScrollPerc(0);
+
+    footerBox.setContent(' {bold}↑↓{/} Select file  {bold}Tab{/} Switch  {bold}Esc{/} Back  {bold}q{/} Quit');
+
+    diffFileList.focus();
+    screen.render();
+  }
+
+  function exitDiffMode(): void {
+    diffMode = false;
+    diffChanges = [];
+
+    diffFileList.hide();
+    diffContent.hide();
+    headerBox.show();
+    processBox.show();
+    sessionList.show();
+    detailBox.show();
+
+    footerBox.setContent(' {bold}↑↓{/} Navigate  {bold}Enter{/} Detail  {bold}d{/} Diff  {bold}Tab{/} Switch  {bold}r{/} Refresh  {bold}q{/} Quit');
+
+    focusedPanel = 'sessions';
+    sessionList.focus();
+    sessionList.style.border.fg = ACCENT;
+    detailBox.style.border.fg = BORDER_COLOR;
+    screen.render();
+  }
+
+  function diffNavigate(): void {
+    diffFileList.select(diffFileIdx);
+    if (diffChanges[diffFileIdx]) {
+      diffContent.setContent(formatDiffContent(diffChanges[diffFileIdx]));
+      diffContent.setScrollPerc(0);
+    }
+    screen.render();
+  }
+
+  // ── Diff mode keyboard ─────────────────────────────────────────
+
+  screen.key(['d'], () => {
+    if (!diffMode) enterDiffMode();
+  });
+
+  screen.key(['escape'], () => {
+    if (diffMode) exitDiffMode();
+  });
+
+  diffFileList.key(['up', 'k'], () => {
+    if (diffFileIdx > 0) { diffFileIdx--; diffNavigate(); }
+  });
+
+  diffFileList.key(['down', 'j'], () => {
+    if (diffFileIdx < diffChanges.length - 1) { diffFileIdx++; diffNavigate(); }
+  });
+
+  diffFileList.key(['tab'], () => {
+    diffFocused = 'diff';
+    diffContent.focus();
+    diffFileList.style.border.fg = BORDER_COLOR;
+    diffContent.style.border.fg = ACCENT;
+    screen.render();
+  });
+
+  diffContent.key(['tab'], () => {
+    diffFocused = 'files';
+    diffFileList.focus();
+    diffFileList.style.border.fg = ACCENT;
+    diffContent.style.border.fg = BORDER_COLOR;
+    screen.render();
+  });
+
+  diffFileList.on('select item', (_item: any, index: number) => {
+    diffFileIdx = index;
+    diffNavigate();
   });
 
   // ── Start reactive data loops ──────────────────────────────────
