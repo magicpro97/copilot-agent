@@ -80,6 +80,36 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .error-list li{padding:5px 0;font-size:12px;color:var(--red)}
 .more{font-size:11px;color:var(--text3);padding:4px 0}
 .empty-detail{display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3)}
+.diff-btn{background:var(--bg3);color:var(--cyan);border:1px solid var(--border);border-radius:4px;padding:2px 10px;font-size:11px;cursor:pointer;font-family:var(--font-sans);transition:all .15s}
+.diff-btn:hover{background:var(--bg4);border-color:var(--cyan)}
+.diff-view{padding:0}
+.diff-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.diff-summary{font-size:12px;color:var(--text2)}
+.diff-file{margin-bottom:16px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.diff-header{background:var(--bg3);padding:8px 14px;font-size:12px;font-family:var(--font-mono);font-weight:600;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
+.diff-body{background:var(--bg);font-family:var(--font-mono);font-size:12px;line-height:1.6;overflow-x:auto;max-height:400px;overflow-y:auto}
+.diff-add{background:rgba(63,185,80,.08);color:#7ee787;padding:0 14px;white-space:pre;border-left:3px solid var(--green)}
+.diff-del{background:rgba(248,81,73,.08);color:#ffa198;padding:0 14px;white-space:pre;border-left:3px solid var(--red)}
+.diff-more{padding:6px 14px;color:var(--text3);font-style:italic}
+.diff-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;gap:12px;color:var(--text3)}
+.diff-empty-icon{font-size:32px}
+.diff2html-wrapper{overflow-x:auto}
+.diff2html-wrapper .d2h-wrapper{background:transparent}
+.diff2html-wrapper .d2h-file-header{background:var(--bg3);border-color:var(--border);color:var(--text)}
+.diff2html-wrapper .d2h-file-list-wrapper{background:var(--bg2);border-color:var(--border)}
+.diff2html-wrapper .d2h-file-list-line{color:var(--text)}
+.diff2html-wrapper .d2h-code-linenumber{background:var(--bg);color:var(--text3);border-color:var(--border)}
+.diff2html-wrapper .d2h-code-line{background:var(--bg);color:var(--text)}
+.diff2html-wrapper .d2h-code-side-line{background:var(--bg);color:var(--text)}
+.diff2html-wrapper .d2h-del{background:rgba(248,81,73,.1);color:#ffa198}
+.diff2html-wrapper .d2h-ins{background:rgba(63,185,80,.1);color:#7ee787}
+.diff2html-wrapper .d2h-del .d2h-code-side-linenumber,.diff2html-wrapper .d2h-del .d2h-code-linenumber{background:rgba(248,81,73,.15);border-color:rgba(248,81,73,.2)}
+.diff2html-wrapper .d2h-ins .d2h-code-side-linenumber,.diff2html-wrapper .d2h-ins .d2h-code-linenumber{background:rgba(63,185,80,.15);border-color:rgba(63,185,80,.2)}
+.diff2html-wrapper .d2h-info{background:var(--bg3);color:var(--text2);border-color:var(--border)}
+.diff2html-wrapper .d2h-emptyplaceholder{background:var(--bg3)}
+.diff2html-wrapper .d2h-file-diff{border-color:var(--border)}
+.diff2html-wrapper .d2h-diff-tbody tr td{border-color:var(--border)}
+.diff2html-wrapper .d2h-tag{background:var(--bg3);color:var(--text2)}
 @media(max-width:768px){.main{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
 `;
 
@@ -89,6 +119,7 @@ export const layoutHead = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Copilot Agent Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
 <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>

@@ -20,6 +20,14 @@ export interface Session {
   agent: AgentType;
 }
 
+export interface FileChange {
+  path: string;
+  type: 'create' | 'edit';
+  oldStr?: string;
+  newStr?: string;
+  content?: string;  // full content for creates
+}
+
 export interface SessionReport {
   id: string;
   cwd: string;
@@ -36,6 +44,7 @@ export interface SessionReport {
   gitCommits: string[];
   filesCreated: string[];
   filesEdited: string[];
+  fileChanges: FileChange[];
   errors: string[];
   taskCompletions: string[];
   agent: AgentType;
@@ -225,6 +234,7 @@ export function getSessionReport(sid: string): SessionReport | null {
     gitCommits: [],
     filesCreated: [],
     filesEdited: [],
+    fileChanges: [],
     errors: [],
     taskCompletions: [],
     agent: 'copilot',
@@ -272,12 +282,23 @@ export function getSessionReport(sid: string): SessionReport | null {
         // Track file creates/edits
         if (toolName === 'create') {
           const args = data.arguments as Record<string, string> | undefined;
-          if (args?.path) report.filesCreated.push(args.path);
+          if (args?.path) {
+            report.filesCreated.push(args.path);
+            report.fileChanges.push({
+              path: args.path, type: 'create',
+              content: args.file_text?.slice(0, 5000),
+            });
+          }
         }
         if (toolName === 'edit') {
           const args = data.arguments as Record<string, string> | undefined;
-          if (args?.path && !report.filesEdited.includes(args.path)) {
-            report.filesEdited.push(args.path);
+          if (args?.path) {
+            if (!report.filesEdited.includes(args.path)) report.filesEdited.push(args.path);
+            report.fileChanges.push({
+              path: args.path, type: 'edit',
+              oldStr: args.old_str?.slice(0, 3000),
+              newStr: args.new_str?.slice(0, 3000),
+            });
           }
         }
         break;
@@ -488,7 +509,7 @@ export function getClaudeSessionReport(sid: string): SessionReport | null {
     id: sid, cwd, summary: '', startTime: '', endTime: '',
     durationMs: 0, complete: false, userMessages: 0, assistantTurns: 0,
     outputTokens: 0, premiumRequests: 0, toolUsage: {}, gitCommits: [],
-    filesCreated: [], filesEdited: [], errors: [], taskCompletions: [],
+    filesCreated: [], filesEdited: [], fileChanges: [], errors: [], taskCompletions: [],
     agent: 'claude',
   };
 
@@ -533,14 +554,27 @@ export function getClaudeSessionReport(sid: string): SessionReport | null {
       }
       // Track file operations
       if (toolName === 'Write' || toolName === 'Create') {
-        const path = (event.input as Record<string, string>)?.file_path
-          ?? (event.input as Record<string, string>)?.path;
-        if (path) report.filesCreated.push(path);
+        const inp = event.input as Record<string, string> | undefined;
+        const path = inp?.file_path ?? inp?.path;
+        if (path) {
+          report.filesCreated.push(path);
+          report.fileChanges.push({
+            path, type: 'create',
+            content: (inp?.content ?? inp?.file_text)?.slice(0, 5000),
+          });
+        }
       }
       if (toolName === 'Edit') {
-        const path = (event.input as Record<string, string>)?.file_path
-          ?? (event.input as Record<string, string>)?.path;
-        if (path && !report.filesEdited.includes(path)) report.filesEdited.push(path);
+        const inp = event.input as Record<string, string> | undefined;
+        const path = inp?.file_path ?? inp?.path;
+        if (path) {
+          if (!report.filesEdited.includes(path)) report.filesEdited.push(path);
+          report.fileChanges.push({
+            path, type: 'edit',
+            oldStr: inp?.old_str?.slice(0, 3000),
+            newStr: inp?.new_str?.slice(0, 3000),
+          });
+        }
       }
     }
 

@@ -12,7 +12,7 @@ import { exec } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import type { AgentType } from './provider.js';
-import type { Session, SessionReport } from './session.js';
+import type { Session, SessionReport, FileChange } from './session.js';
 
 const SESSION_DIR = join(homedir(), '.copilot', 'session-state');
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
@@ -253,7 +253,7 @@ async function loadCopilotReportAsync(sid: string): Promise<SessionReport | null
     startTime: '', endTime: '', durationMs: 0, complete: false,
     userMessages: 0, assistantTurns: 0, outputTokens: 0, premiumRequests: 0,
     toolUsage: {}, gitCommits: [], filesCreated: [], filesEdited: [],
-    errors: [], taskCompletions: [], agent: 'copilot',
+    fileChanges: [], errors: [], taskCompletions: [], agent: 'copilot',
   };
 
   await parseJsonlChunked(content, (event) => {
@@ -282,11 +282,17 @@ async function loadCopilotReportAsync(sid: string): Promise<SessionReport | null
         }
         if (toolName === 'create') {
           const args = data.arguments as Record<string, string> | undefined;
-          if (args?.path) report.filesCreated.push(args.path);
+          if (args?.path) {
+            report.filesCreated.push(args.path);
+            report.fileChanges.push({ path: args.path, type: 'create', content: args.file_text?.slice(0, 5000) });
+          }
         }
         if (toolName === 'edit') {
           const args = data.arguments as Record<string, string> | undefined;
-          if (args?.path && !report.filesEdited.includes(args.path)) report.filesEdited.push(args.path);
+          if (args?.path) {
+            if (!report.filesEdited.includes(args.path)) report.filesEdited.push(args.path);
+            report.fileChanges.push({ path: args.path, type: 'edit', oldStr: args.old_str?.slice(0, 3000), newStr: args.new_str?.slice(0, 3000) });
+          }
         }
         break;
       }
@@ -338,7 +344,7 @@ async function loadClaudeReportAsync(sid: string): Promise<SessionReport | null>
     id: sid, cwd, summary: '', startTime: '', endTime: '',
     durationMs: 0, complete: false, userMessages: 0, assistantTurns: 0,
     outputTokens: 0, premiumRequests: 0, toolUsage: {}, gitCommits: [],
-    filesCreated: [], filesEdited: [], errors: [], taskCompletions: [],
+    filesCreated: [], filesEdited: [], fileChanges: [], errors: [], taskCompletions: [],
     agent: 'claude',
   };
 
@@ -356,6 +362,23 @@ async function loadClaudeReportAsync(sid: string): Promise<SessionReport | null>
     if (type === 'tool_use' || type === 'tool_result') {
       const name = (event.name ?? 'tool') as string;
       report.toolUsage[name] = (report.toolUsage[name] ?? 0) + 1;
+      if (type === 'tool_use') {
+        const inp = event.input as Record<string, string> | undefined;
+        if (name === 'Write' || name === 'Create') {
+          const path = inp?.file_path ?? inp?.path;
+          if (path) {
+            report.filesCreated.push(path);
+            report.fileChanges.push({ path, type: 'create', content: (inp?.content ?? inp?.file_text)?.slice(0, 5000) });
+          }
+        }
+        if (name === 'Edit') {
+          const path = inp?.file_path ?? inp?.path;
+          if (path) {
+            if (!report.filesEdited.includes(path)) report.filesEdited.push(path);
+            report.fileChanges.push({ path, type: 'edit', oldStr: inp?.old_str?.slice(0, 3000), newStr: inp?.new_str?.slice(0, 3000) });
+          }
+        }
+      }
     }
   });
 

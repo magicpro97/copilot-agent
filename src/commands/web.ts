@@ -7,7 +7,7 @@ import { listAllSessions, getAgentSessionReport } from '../lib/session.js';
 import { findAgentProcesses } from '../lib/process.js';
 import { ok, info, fail } from '../lib/logger.js';
 import { layoutHead, layoutFoot } from '../web/layout.js';
-import { renderStats, renderProcesses, renderSessionList, renderDetail } from '../web/views.js';
+import { renderStats, renderProcesses, renderSessionList, renderDetail, renderDiffView } from '../web/views.js';
 
 export function registerWebCommand(program: Command): void {
   program
@@ -45,6 +45,13 @@ function startWebServer(port: number, autoOpen: boolean): void {
     const report = getAgentSessionReport(c.req.param('id'));
     if (!report) return c.json({ error: 'Not found' }, 404);
     return c.json(report);
+  });
+
+  app.get('/partial/diff/:id', (c) => {
+    const report = getAgentSessionReport(c.req.param('id'));
+    if (!report) return c.html('<div class="empty-detail">Session not found</div>');
+    const style = (c.req.query('style') === 'side' ? 'side' : 'line') as 'side' | 'line';
+    return c.html(renderDiffView(report, style));
   });
 
   // ─── SSE for live updates (only push when data changes) ──

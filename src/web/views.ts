@@ -1,5 +1,8 @@
-import type { SessionReport } from '../lib/session.js';
+import type { SessionReport, FileChange } from '../lib/session.js';
 import type { CopilotProcess } from '../lib/process.js';
+import { createPatch } from 'diff';
+import { html as diff2html } from 'diff2html';
+import { ColorSchemeType } from 'diff2html/lib/types.js';
 
 // ─── Helpers ───────────────────────────────────────────────
 function esc(s: string): string {
@@ -168,7 +171,12 @@ export function renderDetail(s: SessionReport): string {
     ...s.filesEdited.map(f => ({ path: f, type: 'edited' as const })),
   ];
   if (files.length > 0) {
-    html += `<div class="sub"><div class="sub-title">📁 Files Changed <span class="count">${files.length}</span></div><ul class="file-list">`;
+    const hasDiffs = s.fileChanges && s.fileChanges.length > 0;
+    html += `<div class="sub"><div class="sub-title">📁 Files Changed <span class="count">${files.length}</span>`;
+    if (hasDiffs) {
+      html += ` <button class="diff-btn" hx-get="/partial/diff/${s.id}" hx-target="#detail" hx-swap="innerHTML">View Diff</button>`;
+    }
+    html += `</div><ul class="file-list">`;
     for (const f of files.slice(0, 25)) {
       const cls = f.type === 'created' ? 'file-created' : 'file-edited';
       const icon = f.type === 'created' ? '+' : '~';
@@ -198,6 +206,80 @@ export function renderDetail(s: SessionReport): string {
     if (s.errors.length > 5) html += `<li class="more">… +${s.errors.length - 5} more</li>`;
     html += `</ul></div>`;
   }
+
+  return html;
+}
+
+// ─── Diff View (powered by diff + diff2html) ──────────────
+function changesToUnifiedDiff(changes: FileChange[], proj: string): string {
+  const patches: string[] = [];
+
+  // Group changes by file, preserving order
+  const byFile = new Map<string, FileChange[]>();
+  for (const c of changes) {
+    const arr = byFile.get(c.path) ?? [];
+    arr.push(c);
+    byFile.set(c.path, arr);
+  }
+
+  for (const [filePath, fileChanges] of byFile) {
+    const short = shortPath(filePath, proj);
+    for (const change of fileChanges) {
+      if (change.type === 'create') {
+        const content = change.content ?? '';
+        const patch = createPatch(short, '', content, '', '', { context: 3 });
+        patches.push(patch);
+      } else if (change.type === 'edit') {
+        const oldStr = change.oldStr ?? '';
+        const newStr = change.newStr ?? '';
+        const patch = createPatch(short, oldStr, newStr, '', '', { context: 3 });
+        patches.push(patch);
+      }
+    }
+  }
+
+  return patches.join('\n');
+}
+
+export function renderDiffView(s: SessionReport, viewStyle: 'side' | 'line' = 'line'): string {
+  const proj = (s.cwd ?? '').split('/').pop() ?? '';
+  const changes = s.fileChanges ?? [];
+
+  if (changes.length === 0) {
+    return `<div class="diff-empty">
+      <div class="diff-empty-icon">📄</div>
+      <div>No diff data available for this session</div>
+      <button class="diff-btn" hx-get="/partial/detail/${s.id}" hx-target="#detail" hx-swap="innerHTML">← Back to Detail</button>
+    </div>`;
+  }
+
+  const byFile = new Map<string, FileChange[]>();
+  for (const c of changes) {
+    const arr = byFile.get(c.path) ?? [];
+    arr.push(c);
+    byFile.set(c.path, arr);
+  }
+
+  const unifiedDiff = changesToUnifiedDiff(changes, proj);
+  const outputFormat = viewStyle === 'side' ? 'side-by-side' : 'line-by-line';
+  const diffHtml = diff2html(unifiedDiff, {
+    drawFileList: true,
+    matching: 'lines',
+    outputFormat,
+    colorScheme: ColorSchemeType.DARK,
+  });
+
+  const otherStyle = viewStyle === 'side' ? 'line' : 'side';
+  const otherLabel = viewStyle === 'side' ? 'Unified' : 'Side-by-Side';
+
+  let html = `<div class="diff-view">
+    <div class="diff-toolbar">
+      <button class="diff-btn" hx-get="/partial/detail/${s.id}" hx-target="#detail" hx-swap="innerHTML">← Back</button>
+      <span class="diff-summary">${changes.length} change${changes.length > 1 ? 's' : ''} across ${byFile.size} file${byFile.size > 1 ? 's' : ''}</span>
+      <button class="diff-btn" hx-get="/partial/diff/${s.id}?style=${otherStyle}" hx-target="#detail" hx-swap="innerHTML">${otherLabel}</button>
+    </div>
+    <div class="diff2html-wrapper">${diffHtml}</div>
+  </div>`;
 
   return html;
 }
