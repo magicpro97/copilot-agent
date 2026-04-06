@@ -10,7 +10,8 @@ export type CopilotResult = AgentResult;
 
 export function isCopilotInstalled(): boolean {
   try {
-    execSync('which copilot', { stdio: 'pipe', encoding: 'utf-8' });
+    const cmd = process.platform === 'win32' ? 'where copilot' : 'which copilot';
+    execSync(cmd, { stdio: 'pipe', encoding: 'utf-8' });
     return true;
   } catch {
     return false;
@@ -29,7 +30,11 @@ export function assertCopilot(): void {
  */
 export function findAgentProcesses(agentFilter?: AgentType): AgentProcess[] {
   try {
-    const output = execSync('ps -eo pid,command', { encoding: 'utf-8' });
+    const isWin = process.platform === 'win32';
+    const cmd = isWin
+      ? 'wmic process get ProcessId,CommandLine /format:csv'
+      : 'ps -eo pid,command';
+    const output = execSync(cmd, { encoding: 'utf-8' });
     const results: AgentProcess[] = [];
     const myPid = process.pid;
     const parentPid = process.ppid;
@@ -38,42 +43,56 @@ export function findAgentProcesses(agentFilter?: AgentType): AgentProcess[] {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      const isCopilot = (trimmed.includes('copilot') || trimmed.includes('@githubnext/copilot'))
-        && !trimmed.includes('copilot-agent') && !trimmed.includes('copilot-api');
-      const isClaude = trimmed.includes('claude') && !trimmed.includes('claude-code')
-        && !trimmed.includes('copilot-agent');
+      let pid: number;
+      let cmdStr: string;
+
+      if (isWin) {
+        const parts = trimmed.split(',');
+        if (parts.length < 3) continue;
+        const pidStr = parts[parts.length - 1].trim();
+        pid = parseInt(pidStr, 10);
+        if (isNaN(pid)) continue;
+        cmdStr = parts.slice(1, -1).join(',').trim();
+      } else {
+        const match = trimmed.match(/^(\d+)\s+(.+)$/);
+        if (!match) continue;
+        pid = parseInt(match[1], 10);
+        cmdStr = match[2];
+      }
+
+      if (pid === myPid || pid === parentPid) continue;
+
+      const lower = cmdStr.toLowerCase();
+      const isCopilot = (lower.includes('copilot') || lower.includes('@githubnext/copilot'))
+        && !lower.includes('copilot-agent') && !lower.includes('copilot-api');
+      const isClaude = lower.includes('claude') && !lower.includes('claude-code')
+        && !lower.includes('copilot-agent');
 
       if (!isCopilot && !isClaude) continue;
-      if (trimmed.includes('ps -eo') || trimmed.includes('grep')) continue;
+      if (lower.includes('ps -eo') || lower.includes('grep') || lower.includes('wmic')) continue;
 
       const agent: AgentType = isClaude ? 'claude' : 'copilot';
       if (agentFilter && agent !== agentFilter) continue;
 
-      const match = trimmed.match(/^(\d+)\s+(.+)$/);
-      if (!match) continue;
-
-      const pid = parseInt(match[1], 10);
-      if (pid === myPid || pid === parentPid) continue;
-      const cmd = match[2];
-
-      // Extract session ID from command args
       const sidMatch = agent === 'copilot'
-        ? cmd.match(/resume[= ]+([a-f0-9-]{36})/)
-        : cmd.match(/(?:--resume|--session-id)[= ]+([a-f0-9-]{36})/);
+        ? cmdStr.match(/resume[= ]+([a-f0-9-]{36})/)
+        : cmdStr.match(/(?:--resume|--session-id)[= ]+([a-f0-9-]{36})/);
 
       let cwd: string | undefined;
-      try {
-        cwd = execSync(`lsof -p ${pid} -Fn 2>/dev/null | grep '^n/' | head -1`, {
-          encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-        }).trim().slice(1) || undefined;
-      } catch { /* best effort */ }
+      if (!isWin) {
+        try {
+          cwd = execSync(`lsof -p ${pid} -Fn 2>/dev/null | grep '^n/' | head -1`, {
+            encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+          }).trim().slice(1) || undefined;
+        } catch { /* best effort */ }
+      }
 
       const sid = sidMatch?.[1];
       if (!cwd && sid) {
         cwd = (agent === 'copilot' ? getSessionCwd(sid) : getClaudeSessionCwd(sid)) || undefined;
       }
 
-      results.push({ pid, command: cmd, sessionId: sid, cwd, agent });
+      results.push({ pid, command: cmdStr, sessionId: sid, cwd, agent });
     }
     return results;
   } catch {

@@ -21,12 +21,13 @@ export interface AgentResult {
  */
 export function detectAvailableAgents(): AgentType[] {
   const agents: AgentType[] = [];
+  const which = process.platform === 'win32' ? 'where' : 'which';
   try {
-    execSync('which copilot', { stdio: 'pipe' });
+    execSync(`${which} copilot`, { stdio: 'pipe' });
     agents.push('copilot');
   } catch { /* not installed */ }
   try {
-    execSync('which claude', { stdio: 'pipe' });
+    execSync(`${which} claude`, { stdio: 'pipe' });
     agents.push('claude');
   } catch { /* not installed */ }
   return agents;

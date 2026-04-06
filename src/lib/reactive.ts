@@ -175,39 +175,62 @@ export interface ProcessInfo {
 
 async function findProcessesAsync(): Promise<ProcessInfo[]> {
   try {
-    const output = await execAsync('ps -eo pid,command');
-    const results: ProcessInfo[] = [];
-    const myPid = process.pid;
-    const parentPid = process.ppid;
-
-    for (const line of output.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      const isCopilot = (trimmed.includes('copilot') || trimmed.includes('@githubnext/copilot'))
-        && !trimmed.includes('copilot-agent') && !trimmed.includes('copilot-api');
-      const isClaude = trimmed.includes('claude') && !trimmed.includes('claude-code')
-        && !trimmed.includes('copilot-agent');
-      if (!isCopilot && !isClaude) continue;
-      if (trimmed.includes('ps -eo') || trimmed.includes('grep')) continue;
-
-      const agent: AgentType = isClaude ? 'claude' : 'copilot';
-      const match = trimmed.match(/^(\d+)\s+(.+)$/);
-      if (!match) continue;
-      const pid = parseInt(match[1], 10);
-      if (pid === myPid || pid === parentPid) continue;
-      const cmd = match[2];
-
-      const sidMatch = agent === 'copilot'
-        ? cmd.match(/resume[= ]+([a-f0-9-]{36})/)
-        : cmd.match(/(?:--resume|--session-id)[= ]+([a-f0-9-]{36})/);
-
-      results.push({ pid, command: cmd, sessionId: sidMatch?.[1], agent });
-    }
-    return results;
+    const isWin = process.platform === 'win32';
+    const cmd = isWin
+      ? 'wmic process get ProcessId,CommandLine /format:csv'
+      : 'ps -eo pid,command';
+    const output = await execAsync(cmd);
+    return parseProcessOutput(output, isWin);
   } catch {
     return [];
   }
+}
+
+function parseProcessOutput(output: string, isWin: boolean): ProcessInfo[] {
+  const results: ProcessInfo[] = [];
+  const myPid = process.pid;
+  const parentPid = process.ppid;
+
+  for (const line of output.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    let pid: number;
+    let cmd: string;
+
+    if (isWin) {
+      // wmic CSV: Node,CommandLine,ProcessId
+      const parts = trimmed.split(',');
+      if (parts.length < 3) continue;
+      const pidStr = parts[parts.length - 1].trim();
+      pid = parseInt(pidStr, 10);
+      if (isNaN(pid)) continue;
+      cmd = parts.slice(1, -1).join(',').trim();
+    } else {
+      const match = trimmed.match(/^(\d+)\s+(.+)$/);
+      if (!match) continue;
+      pid = parseInt(match[1], 10);
+      cmd = match[2];
+    }
+
+    if (pid === myPid || pid === parentPid) continue;
+
+    const lower = cmd.toLowerCase();
+    const isCopilot = (lower.includes('copilot') || lower.includes('@githubnext/copilot'))
+      && !lower.includes('copilot-agent') && !lower.includes('copilot-api');
+    const isClaude = lower.includes('claude') && !lower.includes('claude-code')
+      && !lower.includes('copilot-agent');
+    if (!isCopilot && !isClaude) continue;
+    if (lower.includes('ps -eo') || lower.includes('grep') || lower.includes('wmic')) continue;
+
+    const agent: AgentType = isClaude ? 'claude' : 'copilot';
+    const sidMatch = agent === 'copilot'
+      ? cmd.match(/resume[= ]+([a-f0-9-]{36})/)
+      : cmd.match(/(?:--resume|--session-id)[= ]+([a-f0-9-]{36})/);
+
+    results.push({ pid, command: cmd, sessionId: sidMatch?.[1], agent });
+  }
+  return results;
 }
 
 // ── Async session report ─────────────────────────────────────────
