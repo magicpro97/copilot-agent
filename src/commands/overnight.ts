@@ -79,7 +79,7 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
     return;
   }
 
-  // Phase 1: Resume existing incomplete session
+  // Phase 1: Resume existing incomplete session (on its own branch)
   const existingResult = findLatestIncompleteForAgent(opts.agent);
   const existingSession = existingResult?.id;
   if (existingSession && validateSession(existingSession)) {
@@ -91,15 +91,32 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
     }
 
     if (!hasTaskComplete(existingSession) && !isPastDeadline(opts.until)) {
+      // Create a dedicated branch for resume work
+      if (mainBranch && isGitRepo(dir)) {
+        const resumeBranch = `agent/resume-${existingSession.slice(0, 8)}`;
+        const currentBranch = gitCurrentBranch(dir);
+        if (currentBranch === mainBranch) {
+          gitStash(dir);
+          gitCreateBranch(dir, resumeBranch);
+          info(`Created branch: ${CYAN}${resumeBranch}${RESET}`);
+        }
+      }
+
       info('Resuming incomplete session...');
       const cwd = getSessionCwd(existingSession) || dir;
       await runAgentResume(
         opts.agent,
         existingSession,
         opts.steps,
-        'Continue remaining work. Complete the task.',
+        'Continue remaining work. Complete the task. Commit your changes when done.',
         cwd,
       );
+
+      // Return to main branch after resume
+      if (mainBranch && isGitRepo(dir)) {
+        gitStash(dir);
+        gitCheckout(dir, mainBranch);
+      }
     }
   }
 
