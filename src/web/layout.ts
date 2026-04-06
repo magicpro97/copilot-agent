@@ -36,7 +36,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .proc-cwd{color:var(--text3);font-size:12px}
 .proc-cmd{color:var(--text3);font-size:11px;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
 .empty{padding:14px 16px;color:var(--text3);font-size:13px}
-.main{display:grid;grid-template-columns:360px 1fr;gap:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;min-height:calc(100vh - 260px)}
+.main{display:grid;grid-template-columns:360px 1fr;gap:0;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;min-height:calc(100vh - 260px);position:relative}
 .main.sidebar-collapsed{grid-template-columns:0px 1fr}
 .sidebar{border-right:1px solid var(--border);overflow:hidden;width:360px;min-width:0}
 .sidebar.collapsed{width:0;border-right:none}
@@ -44,7 +44,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .sidebar-header{padding:10px 16px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;background:var(--bg2);z-index:2;white-space:nowrap}
 .sidebar-toggle{background:none;border:1px solid var(--border);color:var(--text2);border-radius:4px;width:24px;height:24px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .sidebar-toggle:hover{color:var(--cyan);border-color:var(--cyan)}
-.sidebar-expand{background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:4px;width:28px;height:28px;cursor:pointer;font-size:12px;position:absolute;left:8px;top:8px;z-index:5;display:flex;align-items:center;justify-content:center}
+.sidebar-expand{background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:4px;width:28px;height:28px;cursor:pointer;font-size:12px;position:absolute;left:8px;top:8px;z-index:10;display:flex;align-items:center;justify-content:center}
 .sidebar-expand:hover{color:var(--cyan);border-color:var(--cyan)}
 .count{background:var(--bg3);color:var(--text2);font-size:11px;padding:1px 7px;border-radius:10px;font-weight:500}
 .s-item{padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
@@ -61,7 +61,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .badge-stop{background:rgba(210,153,34,.12);color:var(--yellow)}
 .badge-claude{background:rgba(217,119,6,.15);color:#f59e0b}
 .badge-copilot{background:rgba(56,189,248,.12);color:#38bdf8}
-.detail{padding:20px;overflow-y:auto;position:relative}
+.detail{padding:20px;overflow-y:auto}
 .detail-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .detail-title{font-size:18px;font-weight:700}
 .detail-id{font-family:var(--font-mono);font-size:11px;color:var(--text3);background:var(--bg);padding:3px 8px;border-radius:4px}

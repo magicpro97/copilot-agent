@@ -140,8 +140,8 @@ function startWebServer(port: number, autoOpen: boolean): void {
         </div>
         ${renderSessionList(sessions, firstId)}
       </div>
+      <button class="sidebar-expand" id="sidebar-expand" title="Expand sidebar" style="display:none">▶</button>
       <div class="detail" id="detail">
-        <button class="sidebar-expand" id="sidebar-expand" title="Expand sidebar" style="display:none">▶</button>
         ${firstId ? renderDetail(sessions[0]) : '<div class="empty-detail">No sessions</div>'}
       </div>
     </div>
