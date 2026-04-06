@@ -22,12 +22,13 @@ import { registerScheduleCommand } from './commands/schedule.js';
 import { registerNotifyCommand } from './commands/notify.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerVerifyCommand } from './commands/verify.js';
+import { registerSetupCommand } from './commands/setup.js';
 
 const program = new Command();
 
 program
   .name('copilot-agent')
-  .version('1.3.1')
+  .version('1.3.2')
   .description('Autonomous AI agent manager — auto-resume, task discovery, overnight runs. Supports GitHub Copilot CLI + Claude Code.');
 
 registerStatusCommand(program);
@@ -53,5 +54,6 @@ registerScheduleCommand(program);
 registerNotifyCommand(program);
 registerDoctorCommand(program);
 registerVerifyCommand(program);
+registerSetupCommand(program);
 
 program.parse();

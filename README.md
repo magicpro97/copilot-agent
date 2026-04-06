@@ -29,6 +29,7 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`notify`** | Notifications via OS, Telegram, Discord, Slack |
 | **`doctor`** | System health check — verify CLI, config, sessions, proxy |
 | **`verify`** | Quality gate — tests, lint, build, typecheck with JSON output |
+| **`setup`** | Install AI agent instructions (Copilot, Claude, Cursor) |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -332,6 +333,36 @@ copilot-agent notify events --error true --overnight-done true
 ```
 
 Notifications auto-fire when `watch` or `overnight` sessions complete/error. Config stored in `~/.copilot-agent/notify.yaml`.
+
+### Setup AI agent instructions
+
+```bash
+# Install instructions for all agents (Copilot, Claude, Cursor) in current project
+copilot-agent setup
+
+# Target specific directory
+copilot-agent setup ~/my-project
+
+# Only for specific agent(s)
+copilot-agent setup --target copilot
+copilot-agent setup --target claude,cursor
+
+# Install globally (~/.github, ~/.claude)
+copilot-agent setup --global
+
+# Preview without writing
+copilot-agent setup --dry-run
+
+# Append to existing instruction files
+copilot-agent setup --append
+```
+
+Creates:
+- `.github/instructions/copilot-agent.instructions.md` — GitHub Copilot
+- `CLAUDE.md` — Claude Code
+- `.cursorrules` — Cursor
+
+These files teach AI agents how to use copilot-agent commands, verify quality, and follow best practices.
 
 ### Quality gate (for AI agents)
 
