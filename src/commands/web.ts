@@ -149,7 +149,10 @@ ${layoutFoot}`);
       ok(`Web dashboard → ${url}`);
       info('Press Ctrl+C to stop');
       if (autoOpen) {
-        spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+        const plat = process.platform;
+        const cmd = plat === 'win32' ? 'cmd' : plat === 'darwin' ? 'open' : 'xdg-open';
+        const args = plat === 'win32' ? ['/c', 'start', url] : [url];
+        spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
       }
     });
   } catch (err) {
