@@ -132,10 +132,11 @@ function startWebServer(port: number, autoOpen: boolean): void {
       </div>
     </div>
 
-    <div class="main">
-      <div class="sidebar">
+    <div class="main" id="main-grid">
+      <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-          📋 Sessions <span class="count">${sessions.length}</span>
+          <span>📋 Sessions <span class="count">${sessions.length}</span></span>
+          <button class="sidebar-toggle" id="sidebar-toggle" title="Collapse sidebar">◀</button>
         </div>
         ${renderSessionList(sessions, firstId)}
       </div>
@@ -150,6 +151,27 @@ function startWebServer(port: number, autoOpen: boolean): void {
       document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');
     }, 1000);
     document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');
+
+    (function() {
+      var btn = document.getElementById('sidebar-toggle');
+      var grid = document.getElementById('main-grid');
+      var sb = document.getElementById('sidebar');
+      var collapsed = false;
+      btn.addEventListener('click', function() {
+        collapsed = !collapsed;
+        if (collapsed) {
+          grid.classList.add('sidebar-collapsed');
+          sb.classList.add('collapsed');
+          btn.textContent = '▶';
+          btn.title = 'Expand sidebar';
+        } else {
+          grid.classList.remove('sidebar-collapsed');
+          sb.classList.remove('collapsed');
+          btn.textContent = '◀';
+          btn.title = 'Collapse sidebar';
+        }
+      });
+    })();
   </script>
 </body>
 ${layoutFoot}`);
