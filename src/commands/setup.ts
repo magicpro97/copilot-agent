@@ -12,6 +12,34 @@ function agentInstructions(): string {
 You have access to \`copilot-agent\`, an autonomous AI agent manager CLI.
 Use it to orchestrate tasks, verify quality, manage sessions, and automate workflows.
 
+## ⚠️ MANDATORY RULES — READ FIRST
+
+1. **NEVER commit directly to main/master.** Always create a feature branch first.
+2. **ALWAYS run \`copilot-agent verify\` before committing.** Do not commit broken code.
+3. **Do NOT modify** these protected paths without explicit permission:
+   - \`.env*\`, \`*.secret\`, \`*.key\`, \`*.pem\` — secrets
+   - \`**/production/**\`, \`**/prod/**\` — production configs
+   - \`.github/workflows/**\` — CI/CD pipelines
+   - \`Podfile.lock\`, \`package-lock.json\`, \`yarn.lock\`, \`gradle.lockfile\` — lockfiles (modify only via package manager)
+4. **Commit frequently** with descriptive messages. Small, focused commits.
+5. **Run tests** before AND after changes. If tests fail, fix them before moving on.
+6. **Do not delete or rename** files without clear justification.
+
+## Git Branch Workflow
+
+\`\`\`bash
+# ALWAYS start work on a new branch
+git checkout -b agent/<task-name> main
+
+# After completing work
+git add -A
+git commit -m "feat: description of changes"
+
+# Push and create PR (never push to main directly)
+git push origin HEAD
+copilot-agent pr --draft
+\`\`\`
+
 ## Quick Reference
 
 ### Quality Gate (ALWAYS run after making changes)
@@ -94,11 +122,13 @@ copilot-agent quota --days 7
 
 When working on a project, follow this pattern:
 
-1. **Make changes** to accomplish the task
-2. **Run \`copilot-agent verify\`** to check quality
-3. If verify fails, **read the feedback** and fix the issues
-4. Repeat until \`verify\` passes
-5. **Run \`copilot-agent pr --draft\`** to create a PR
+1. **Create a feature branch** (\`git checkout -b agent/<task-name>\`)
+2. **Make changes** to accomplish the task
+3. **Run \`copilot-agent verify\`** to check quality
+4. If verify fails, **read the feedback** and fix the issues
+5. Repeat until \`verify\` passes
+6. **Commit** with a descriptive message
+7. **Run \`copilot-agent pr --draft\`** to create a PR
 
 ## Exit Codes
 
@@ -158,6 +188,12 @@ function hooksYaml(): string {
   return `# copilot-agent hooks — quality gates for AI agents
 # Automatically runs after agent events to prevent broken code.
 
+on_session_start:
+  # Ensure agent is NOT on main/master before starting work
+  - command: "branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null); if [ \\"$branch\\" = \\"main\\" ] || [ \\"$branch\\" = \\"master\\" ]; then echo 'ERROR: Create a feature branch first! Do not work on main/master.' >&2; exit 1; fi"
+    name: "Branch guard"
+    timeout: 5
+
 on_task_complete:
   # Verify quality after every completed task
   - command: "copilot-agent verify --checks test,lint,build,typecheck"
@@ -169,8 +205,8 @@ on_session_end:
   - command: "copilot-agent verify"
     name: "Final quality check"
     timeout: 180
-  # Push changes if on a feature branch (not main/master)
-  # - command: "git rev-parse --abbrev-ref HEAD | grep -vE '^(main|master)$' && git push origin HEAD || true"
+  # Push feature branch (never main/master)
+  # - command: "branch=$(git rev-parse --abbrev-ref HEAD); echo $branch | grep -vqE '^(main|master)$' && git push origin HEAD || true"
   #   name: "Auto-push feature branch"
   #   timeout: 30
 
