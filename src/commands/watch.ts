@@ -17,6 +17,7 @@ import { resolveAgent, assertAgent, type AgentType } from '../lib/provider.js';
 import { log, ok, warn, fail, info, notify } from '../lib/logger.js';
 import { CYAN, RESET } from '../lib/colors.js';
 import { notifySessionEnd, notifyError } from '../lib/notify.js';
+import { runVerify } from '../lib/verify.js';
 
 export function registerWatchCommand(program: Command): void {
   program
@@ -26,6 +27,7 @@ export function registerWatchCommand(program: Command): void {
     .option('-r, --max-resumes <n>', 'Max number of resumes', '10')
     .option('-c, --cooldown <n>', 'Seconds between resumes', '10')
     .option('-m, --message <msg>', 'Message to send on resume')
+    .option('--verify', 'Run quality checks when session completes')
     .option('-a, --agent <type>', 'Agent to use: copilot or claude')
     .action(async (sid: string | undefined, opts) => {
       try {
@@ -34,6 +36,7 @@ export function registerWatchCommand(program: Command): void {
           maxResumes: parseInt(opts.maxResumes, 10),
           cooldown: parseInt(opts.cooldown, 10),
           message: opts.message,
+          verify: opts.verify ?? false,
           agent: resolveAgent(opts.agent),
         });
       } catch (err) {
@@ -48,6 +51,7 @@ interface WatchOptions {
   maxResumes: number;
   cooldown: number;
   message?: string;
+  verify: boolean;
   agent: AgentType;
 }
 
@@ -94,6 +98,32 @@ async function watchCommand(sid: string | undefined, opts: WatchOptions): Promis
 
     if (hasTaskComplete(sid)) {
       ok(`Task complete! Summary: ${getSessionSummary(sid) || 'none'}`);
+
+      // Quality gate
+      if (opts.verify) {
+        const cwd = getSessionCwd(sid) || process.cwd();
+        info('Running quality checks…');
+        const vResult = runVerify({ dir: cwd });
+        if (vResult.passed) {
+          ok(`Quality gate passed (${vResult.summary.passed}/${vResult.summary.total})`);
+        } else {
+          warn(`Quality gate FAILED: ${vResult.failedChecks.join(', ')}`);
+          // Resume with feedback to fix
+          if (resumes < opts.maxResumes) {
+            resumes++;
+            log(`Resuming to fix quality issues (${resumes}/${opts.maxResumes})…`);
+            const cwd2 = getSessionCwd(sid) || undefined;
+            const result = await runAgentResume(
+              opts.agent, sid, opts.steps,
+              vResult.feedback,
+              cwd2,
+            );
+            if (result.sessionId && result.sessionId !== sid) sid = result.sessionId;
+            continue;
+          }
+        }
+      }
+
       notify('Task completed!', `Session ${sid.slice(0, 8)}`);
       await notifySessionEnd(sid, getSessionSummary(sid) || 'Task completed');
       return;

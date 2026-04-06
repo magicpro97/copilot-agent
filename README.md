@@ -28,6 +28,7 @@ Autonomous AI agent manager — auto-resume sessions, discover tasks, run overni
 | **`review`** | AI-powered code review of session changes, diffs, or PRs |
 | **`notify`** | Notifications via OS, Telegram, Discord, Slack |
 | **`doctor`** | System health check — verify CLI, config, sessions, proxy |
+| **`verify`** | Quality gate — tests, lint, build, typecheck with JSON output |
 
 All commands support `--agent copilot` or `--agent claude` (auto-detects if omitted).
 
@@ -331,6 +332,33 @@ copilot-agent notify events --error true --overnight-done true
 ```
 
 Notifications auto-fire when `watch` or `overnight` sessions complete/error. Config stored in `~/.copilot-agent/notify.yaml`.
+
+### Quality gate (for AI agents)
+
+```bash
+# Run all quality checks (tests, lint, build, typecheck)
+copilot-agent verify
+
+# JSON output — for AI agent consumption
+copilot-agent verify --json
+
+# Only run specific checks
+copilot-agent verify --checks test,lint
+
+# Show agent-friendly feedback on failure
+copilot-agent verify --feedback
+```
+
+**Exit codes:** `0` = all passed, `1` = check(s) failed, `2` = all skipped
+
+**AI agent integration:**
+```bash
+# Auto-verify after each task, resume with feedback if checks fail
+copilot-agent run --verify
+copilot-agent watch --verify
+```
+
+Auto-detects commands for: TypeScript, React, Next.js, Node, Python, Rust, Go, Kotlin/KMP, Java, Flutter, Swift.
 
 ### System health check
 

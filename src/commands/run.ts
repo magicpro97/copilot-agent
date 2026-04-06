@@ -7,6 +7,7 @@ import { withLock } from '../lib/lock.js';
 import { isGitRepo, gitCurrentBranch, gitStatus, gitStash, gitCheckout, gitCreateBranch, gitCountCommits, createWorktree, removeWorktree } from '../lib/git.js';
 import { log, ok, warn, fail, info, notify } from '../lib/logger.js';
 import { BOLD, CYAN, DIM, GREEN, RESET, YELLOW } from '../lib/colors.js';
+import { runVerify } from '../lib/verify.js';
 
 export function registerRunCommand(program: Command): void {
   program
@@ -17,6 +18,7 @@ export function registerRunCommand(program: Command): void {
     .option('-p, --max-premium <n>', 'Max total premium requests', '50')
     .option('--dry-run', 'Show tasks without executing')
     .option('--worktree', 'Use git worktree for parallel execution (default: wait for idle)')
+    .option('--verify', 'Run quality checks after each task (tests, lint, build)')
     .option('-a, --agent <type>', 'Agent to use: copilot or claude')
     .action(async (dir: string | undefined, opts) => {
       try {
@@ -26,6 +28,7 @@ export function registerRunCommand(program: Command): void {
           maxPremium: parseInt(opts.maxPremium, 10),
           dryRun: opts.dryRun ?? false,
           useWorktree: opts.worktree ?? false,
+          verify: opts.verify ?? false,
           agent: resolveAgent(opts.agent),
         });
       } catch (err) {
@@ -41,6 +44,7 @@ interface RunOptions {
   maxPremium: number;
   dryRun: boolean;
   useWorktree: boolean;
+  verify: boolean;
   agent: AgentType;
 }
 
@@ -127,6 +131,18 @@ async function runCommand(dir: string, opts: RunOptions): Promise<void> {
     premiumTotal += result.premium;
     completed++;
     ok(`${task.title} — ${commits} commit(s), ${result.premium} premium`);
+
+    // Quality gate
+    if (opts.verify) {
+      info('Running quality checks…');
+      const vResult = runVerify({ dir: worktreeCreated ? taskDir : dir });
+      if (vResult.passed) {
+        ok(`Quality gate passed (${vResult.summary.passed}/${vResult.summary.total} checks)`);
+      } else {
+        warn(`Quality gate FAILED: ${vResult.failedChecks.join(', ')}`);
+        log(DIM + vResult.feedback.split('\n').slice(0, 10).join('\n') + RESET);
+      }
+    }
 
     if (worktreeCreated) {
       try {
