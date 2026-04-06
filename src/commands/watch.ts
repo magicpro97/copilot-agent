@@ -16,6 +16,7 @@ import {
 import { resolveAgent, assertAgent, type AgentType } from '../lib/provider.js';
 import { log, ok, warn, fail, info, notify } from '../lib/logger.js';
 import { CYAN, RESET } from '../lib/colors.js';
+import { notifySessionEnd, notifyError } from '../lib/notify.js';
 
 export function registerWatchCommand(program: Command): void {
   program
@@ -94,6 +95,7 @@ async function watchCommand(sid: string | undefined, opts: WatchOptions): Promis
     if (hasTaskComplete(sid)) {
       ok(`Task complete! Summary: ${getSessionSummary(sid) || 'none'}`);
       notify('Task completed!', `Session ${sid.slice(0, 8)}`);
+      await notifySessionEnd(sid, getSessionSummary(sid) || 'Task completed');
       return;
     }
 
@@ -123,6 +125,7 @@ async function watchCommand(sid: string | undefined, opts: WatchOptions): Promis
 
   warn(`Max resumes (${opts.maxResumes}) reached.`);
   notify('Max resumes reached', `Session ${sid.slice(0, 8)}`);
+  await notifyError(sid, `Max resumes (${opts.maxResumes}) reached — session may be stuck`);
 }
 
 function sleep(ms: number): Promise<void> {

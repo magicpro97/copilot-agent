@@ -10,6 +10,7 @@ import { isGitRepo, gitCurrentBranch, gitStash, gitCheckout, gitCreateBranch, gi
 import { findLatestIncomplete, validateSession, hasTaskComplete, getSessionCwd, findLatestIncompleteForAgent } from '../lib/session.js';
 import { log, ok, warn, fail, info, setLogFile, notify } from '../lib/logger.js';
 import { BOLD, CYAN, DIM, RESET } from '../lib/colors.js';
+import { notifyOvernightDone } from '../lib/notify.js';
 
 export function registerOvernightCommand(program: Command): void {
   program
@@ -199,6 +200,7 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
   const summary = `Overnight done — ${taskIdx} tasks, ${totalCommits} commits, ${totalPremium} premium.`;
   ok(summary);
   notify(summary, name);
+  await notifyOvernightDone(taskIdx, `${totalCommits} commits, ${totalPremium} premium`);
 }
 
 function sleep(ms: number): Promise<void> {
