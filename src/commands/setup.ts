@@ -1,13 +1,15 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { homedir } from 'os';
 
 // ── Instruction content ──────────────────────────────────────────
 
 function agentInstructions(): string {
   return `# copilot-agent — AI Agent Integration
+
+<!-- copilot-agent:start -->
 
 You have access to \`copilot-agent\`, an autonomous AI agent manager CLI.
 Use it to orchestrate tasks, verify quality, manage sessions, and automate workflows.
@@ -40,95 +42,108 @@ git push origin HEAD
 copilot-agent pr --draft
 \`\`\`
 
+## Testing Strategy
+
+- **Before changes**: Run existing tests to establish baseline (\`copilot-agent verify --checks test\`)
+- **During changes**: Write/update tests for any new or modified public functions
+- **After changes**: Run full verify to ensure nothing is broken
+- **Coverage**: Aim for ≥80% coverage on changed files. Do not reduce overall coverage.
+- **Test types**: Unit tests first, integration tests for cross-module behavior
+- **Never skip failing tests.** Fix the code or the test, never disable.
+
+## Rollback Procedures
+
+If your changes break things:
+
+1. **Don't panic.** Run \`git stash push -m "broken: description"\` to save work
+2. **Check baseline**: \`git stash && copilot-agent verify\` — does the original code pass?
+3. **If original passes**: Your changes caused the issue. \`git stash pop\` and fix incrementally.
+4. **If original fails**: Pre-existing issue. Document it and work around it.
+5. **Nuclear option**: \`git checkout -- .\` to discard all changes and start fresh.
+
+## Communication Protocols
+
+- **ASK before**: changing architecture, adding dependencies, modifying CI/CD, or deleting files
+- **PROCEED without asking**: fixing bugs, adding tests, refactoring within scope, updating docs
+- **STOP and report**: if tests fail and you can't fix in 3 attempts, if you find security issues, if scope is unclear
+
+## Pre-PR Checklist
+
+Before creating a PR, ensure ALL of the following:
+
+1. ✅ \`copilot-agent verify\` passes (test + lint + build + typecheck)
+2. ✅ Changes are on a feature branch (NOT main/master)
+3. ✅ All commits have descriptive messages
+4. ✅ No secrets, credentials, or API keys in the code
+5. ✅ No unrelated changes included (keep PRs focused)
+6. ✅ README/docs updated if public API changed
+7. ✅ \`copilot-agent diff\` reviewed — no accidental deletions or regressions
+
+## Breaking Change Detection
+
+A change is **breaking** if it:
+- Removes or renames public API, functions, classes, or types
+- Changes function signatures (parameters, return types)
+- Modifies database schemas without migration
+- Changes configuration file formats
+- Removes features users depend on
+
+If you detect a breaking change: **STOP and ask** for confirmation before proceeding.
+
 ## Quick Reference
 
 ### Quality Gate (ALWAYS run after making changes)
 \`\`\`bash
-# Verify all quality checks pass (tests, lint, build, typecheck)
-copilot-agent verify
-
-# JSON output for programmatic use
-copilot-agent verify --json
-# Returns: { "passed": bool, "failedChecks": [...], "feedback": "..." }
-
-# Only specific checks
-copilot-agent verify --checks test,lint
+copilot-agent verify                    # Run all checks
+copilot-agent verify --json             # JSON output
+copilot-agent verify --checks test,lint # Specific checks only
 \`\`\`
 
 ### Task Execution
 \`\`\`bash
-# Discover and run maintenance tasks with auto-verify
-copilot-agent run --verify
-
-# Run on specific directory
-copilot-agent run ~/project --verify --agent copilot
-
-# Preview tasks without executing
-copilot-agent run --dry-run
+copilot-agent run --verify              # Discover & run tasks with auto-verify
+copilot-agent run ~/project --verify    # Run on specific directory
+copilot-agent run --dry-run             # Preview tasks
 \`\`\`
 
 ### Session Management
 \`\`\`bash
-# View active sessions
-copilot-agent status --active
-
-# Watch and auto-resume with quality verification
-copilot-agent watch --verify
-
-# Get session report (what was done, files changed, commits)
-copilot-agent report
-
-# Show git diff from a session
-copilot-agent diff
+copilot-agent status --active           # View active sessions
+copilot-agent watch --verify            # Watch & auto-resume with verify
+copilot-agent report                    # What was done, files changed, commits
+copilot-agent diff                      # Show git diff from session
 \`\`\`
 
 ### Overnight / Long-running
 \`\`\`bash
-# Run tasks continuously until 7am
-copilot-agent overnight ~/project --until 07
-
-# Multi-project orchestration
-copilot-agent multi run --parallel
+copilot-agent overnight ~/project --until 07  # Run until 7am
+copilot-agent multi run --parallel             # Multi-project
 \`\`\`
 
 ### Code Review & PR
 \`\`\`bash
-# AI-powered review of current changes
-copilot-agent review diff
-
-# Create PR from session changes
-copilot-agent pr --draft
+copilot-agent review diff               # AI-powered review
+copilot-agent pr --draft                # Create PR
 \`\`\`
 
-### Context & Handoff
+### Context & System
 \`\`\`bash
-# Generate context summary for handoff
-copilot-agent compact --resume-prompt
-
-# Search past sessions
-copilot-agent log search "auth"
-\`\`\`
-
-### System
-\`\`\`bash
-# Health check
-copilot-agent doctor
-
-# Usage tracking
-copilot-agent quota --days 7
+copilot-agent compact --resume-prompt   # Context summary
+copilot-agent log search "auth"         # Search past sessions
+copilot-agent doctor                    # Health check
+copilot-agent quota --days 7            # Usage tracking
 \`\`\`
 
 ## Workflow: Task → Verify → Fix Loop
-
-When working on a project, follow this pattern:
 
 1. **Create a feature branch** (\`git checkout -b agent/<task-name>\`)
 2. **Make changes** to accomplish the task
 3. **Run \`copilot-agent verify\`** to check quality
 4. If verify fails, **read the feedback** and fix the issues
 5. Repeat until \`verify\` passes
-6. **Commit** with a descriptive message
-7. **Run \`copilot-agent pr --draft\`** to create a PR
+6. **Review with \`copilot-agent diff\`** — check for regressions
+7. **Commit** with a descriptive message
+8. **Run \`copilot-agent pr --draft\`** to create a PR
 
 ## Exit Codes
 
@@ -138,13 +153,7 @@ When working on a project, follow this pattern:
 | 1 | Failure / check(s) failed |
 | 2 | All checks skipped (no commands detected) |
 
-## Key Rules
-
-- ALWAYS run \`copilot-agent verify\` after making code changes
-- Use \`--json\` flag when you need to parse output programmatically
-- Use \`copilot-agent doctor\` to diagnose environment issues
-- Use \`copilot-agent report\` to review what was accomplished
-- Prefer \`copilot-agent run --verify\` for automated task execution
+<!-- copilot-agent:end -->
 `;
 }
 
@@ -187,10 +196,11 @@ function cursorRules(): string {
 function hooksYaml(): string {
   return `# copilot-agent hooks — quality gates for AI agents
 # Automatically runs after agent events to prevent broken code.
+# Commands use cross-platform syntax (git commands + copilot-agent CLI).
 
 on_session_start:
   # Ensure agent is NOT on main/master before starting work
-  - command: "branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null); if [ \\"$branch\\" = \\"main\\" ] || [ \\"$branch\\" = \\"master\\" ]; then echo 'ERROR: Create a feature branch first! Do not work on main/master.' >&2; exit 1; fi"
+  - command: "node -e \\"const b=require('child_process').execSync('git rev-parse --abbrev-ref HEAD',{encoding:'utf8'}).trim(); if(b==='main'||b==='master'){console.error('ERROR: Create a feature branch first! Do not work on '+b+'.'); process.exit(1)}\\" "
     name: "Branch guard"
     timeout: 5
 
@@ -200,27 +210,45 @@ on_task_complete:
     name: "Quality gate"
     timeout: 180
 
+on_pre_commit:
+  # Run verify before each commit
+  - command: "copilot-agent verify --checks build,typecheck"
+    name: "Pre-commit verify"
+    timeout: 120
+
 on_session_end:
   # Final verification when session ends
   - command: "copilot-agent verify"
     name: "Final quality check"
     timeout: 180
-  # Push feature branch (never main/master)
-  # - command: "branch=$(git rev-parse --abbrev-ref HEAD); echo $branch | grep -vqE '^(main|master)$' && git push origin HEAD || true"
+  # Auto-push feature branch (uncomment to enable):
+  # - command: "node -e \\"const b=require('child_process').execSync('git rev-parse --abbrev-ref HEAD',{encoding:'utf8'}).trim(); if(b!=='main'&&b!=='master'){require('child_process').execSync('git push origin HEAD',{stdio:'inherit'})}\\" "
   #   name: "Auto-push feature branch"
   #   timeout: 30
 
 on_error:
   # Stash broken changes so the repo stays clean
-  - command: "git stash push -m 'copilot-agent: stash on error' 2>/dev/null || true"
+  - command: "git stash push -m \\"copilot-agent: stash on error\\""
     name: "Stash broken changes"
     timeout: 10
 
 on_resume:
   # Ensure clean state before agent resumes
-  - command: "copilot-agent verify --checks build,typecheck 2>/dev/null || true"
+  - command: "copilot-agent verify --checks build,typecheck"
     name: "Pre-resume build check"
     timeout: 120
+
+# ── Uncomment hooks below as needed ──
+
+# on_pre_push:
+#   - command: "copilot-agent verify"
+#     name: "Pre-push full verify"
+#     timeout: 180
+
+# on_pre_pr:
+#   - command: "copilot-agent verify && copilot-agent diff"
+#     name: "Pre-PR review"
+#     timeout: 180
 `;
 }
 
@@ -288,22 +316,38 @@ function getGlobalFiles(): SetupFile[] {
   ];
 }
 
+const SECTION_START = '<!-- copilot-agent:start -->';
+const SECTION_END = '<!-- copilot-agent:end -->';
+
 function writeFile(file: SetupFile, opts: { force: boolean; append: boolean }): 'created' | 'updated' | 'appended' | 'skipped' {
-  const dir = file.path.substring(0, file.path.lastIndexOf('/'));
+  const dir = dirname(file.path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   if (existsSync(file.path)) {
     const existing = readFileSync(file.path, 'utf-8');
-    if (existing.includes('copilot-agent')) {
+
+    // Smart section replace: if file has copilot-agent markers, replace that section
+    const hasMarkers = existing.includes(SECTION_START) && existing.includes(SECTION_END);
+    const hasCopilotAgent = existing.includes('copilot-agent');
+
+    if (hasMarkers) {
+      const before = existing.substring(0, existing.indexOf(SECTION_START));
+      const after = existing.substring(existing.indexOf(SECTION_END) + SECTION_END.length);
+      writeFileSync(file.path, before + file.content.trim() + after, 'utf-8');
+      return 'updated';
+    }
+
+    if (hasCopilotAgent) {
       if (!opts.force) return 'skipped';
-      // Replace the copilot-agent section
       writeFileSync(file.path, file.content, 'utf-8');
       return 'updated';
     }
+
     if (opts.append) {
       writeFileSync(file.path, existing + '\n\n' + file.content, 'utf-8');
       return 'appended';
     }
+
     if (!opts.force) return 'skipped';
   }
 
@@ -325,16 +369,34 @@ export function registerSetupCommand(program: Command): void {
     .option('--list', 'List file paths that would be created')
     .action((dir: string | undefined, opts) => {
       const targetDir = dir ?? process.cwd();
-      const targets: Target[] = opts.target
+
+      // Validate directory exists (unless --global)
+      if (!opts.global && dir && !existsSync(targetDir)) {
+        console.log(chalk.red(`\n  ✗ Directory does not exist: ${targetDir}`));
+        console.log(chalk.dim('  Provide a valid project directory or omit to use current directory.\n'));
+        process.exit(1);
+      }
+
+      const validTargets: Target[] = ['copilot', 'claude', 'cursor', 'hooks'];
+      const requestedTargets: string[] = opts.target
         ? opts.target.split(',').map((s: string) => s.trim())
-        : ['copilot', 'claude', 'cursor', 'hooks'];
+        : [...validTargets];
+
+      // Validate target names
+      const invalid = requestedTargets.filter(t => !validTargets.includes(t as Target));
+      if (invalid.length > 0) {
+        console.log(chalk.yellow(`\n  ⚠ Unknown targets: ${invalid.join(', ')}`));
+        console.log(chalk.dim(`  Valid targets: ${validTargets.join(', ')}`));
+      }
+      const targets = requestedTargets.filter(t => validTargets.includes(t as Target)) as Target[];
 
       const files = opts.global
         ? getGlobalFiles().filter(f => targets.includes(f.target))
         : getProjectFiles(targetDir).filter(f => targets.includes(f.target));
 
       if (files.length === 0) {
-        console.log(chalk.yellow('  No targets matched'));
+        console.log(chalk.yellow('\n  No valid targets matched.'));
+        console.log(chalk.dim(`  Valid targets: ${validTargets.join(', ')}\n`));
         return;
       }
 

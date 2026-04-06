@@ -5,7 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { findUpSync } from 'find-up';
 import { execaCommand } from 'execa';
 
-export type HookEvent = 'on_session_start' | 'on_task_complete' | 'on_session_end' | 'on_error' | 'on_resume';
+export type HookEvent = 'on_session_start' | 'on_task_complete' | 'on_session_end' | 'on_error' | 'on_resume' | 'on_pre_commit' | 'on_pre_push' | 'on_pre_pr';
 
 export interface HookDef {
   command: string;
@@ -19,6 +19,9 @@ export interface HooksConfig {
   on_session_end?: HookDef[];
   on_error?: HookDef[];
   on_resume?: HookDef[];
+  on_pre_commit?: HookDef[];
+  on_pre_push?: HookDef[];
+  on_pre_pr?: HookDef[];
 }
 
 export interface HookResult {
@@ -53,10 +56,12 @@ export function loadHooksConfig(cwd?: string): HooksConfig {
     } catch { /* ignore */ }
   }
 
+  const ALL_EVENTS: HookEvent[] = ['on_session_start', 'on_task_complete', 'on_session_end', 'on_error', 'on_resume', 'on_pre_commit', 'on_pre_push', 'on_pre_pr'];
+
   // Merge: global first, then project
   const merged: HooksConfig = {};
   for (const cfg of configs) {
-    for (const event of ['on_session_start', 'on_task_complete', 'on_session_end', 'on_error', 'on_resume'] as HookEvent[]) {
+    for (const event of ALL_EVENTS) {
       const hooks = cfg[event];
       if (hooks && Array.isArray(hooks)) {
         if (!merged[event]) merged[event] = [];
@@ -104,7 +109,7 @@ export async function runHooks(event: HookEvent, cwd?: string, env?: Record<stri
 }
 
 export function getHooksSummary(config: HooksConfig): { event: string; count: number }[] {
-  const events: HookEvent[] = ['on_session_start', 'on_task_complete', 'on_session_end', 'on_error', 'on_resume'];
+  const events: HookEvent[] = ['on_session_start', 'on_task_complete', 'on_session_end', 'on_error', 'on_resume', 'on_pre_commit', 'on_pre_push', 'on_pre_pr'];
   return events
     .map(e => ({ event: e, count: config[e]?.length || 0 }))
     .filter(e => e.count > 0);

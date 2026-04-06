@@ -28,7 +28,7 @@ const program = new Command();
 
 program
   .name('copilot-agent')
-  .version('1.3.5')
+  .version('1.4.0')
   .description('Autonomous AI agent manager — auto-resume, task discovery, overnight runs. Supports GitHub Copilot CLI + Claude Code.');
 
 registerStatusCommand(program);
