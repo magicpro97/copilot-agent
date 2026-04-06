@@ -1,8 +1,6 @@
 import type { SessionReport, FileChange } from '../lib/session.js';
 import type { CopilotProcess } from '../lib/process.js';
 import { createPatch } from 'diff';
-import { html as diff2html } from 'diff2html';
-import { ColorSchemeType } from 'diff2html/lib/types.js';
 
 // ─── Helpers ───────────────────────────────────────────────
 function esc(s: string): string {
@@ -210,11 +208,12 @@ export function renderDetail(s: SessionReport): string {
   return html;
 }
 
-// ─── Diff View (powered by diff + diff2html) ──────────────
-function changesToUnifiedDiff(changes: FileChange[], proj: string): string {
+// ─── Diff View (powered by diff + diff2html + highlight.js) ──
+
+/** Use full file path in diff header so highlight.js auto-detects language from extension */
+function changesToUnifiedDiff(changes: FileChange[], _proj: string): string {
   const patches: string[] = [];
 
-  // Group changes by file, preserving order
   const byFile = new Map<string, FileChange[]>();
   for (const c of changes) {
     const arr = byFile.get(c.path) ?? [];
@@ -223,17 +222,12 @@ function changesToUnifiedDiff(changes: FileChange[], proj: string): string {
   }
 
   for (const [filePath, fileChanges] of byFile) {
-    const short = shortPath(filePath, proj);
     for (const change of fileChanges) {
       if (change.type === 'create') {
         const content = change.content ?? '';
-        const patch = createPatch(short, '', content, '', '', { context: 3 });
-        patches.push(patch);
+        patches.push(createPatch(filePath, '', content, '', '', { context: 3 }));
       } else if (change.type === 'edit') {
-        const oldStr = change.oldStr ?? '';
-        const newStr = change.newStr ?? '';
-        const patch = createPatch(short, oldStr, newStr, '', '', { context: 3 });
-        patches.push(patch);
+        patches.push(createPatch(filePath, change.oldStr ?? '', change.newStr ?? '', '', '', { context: 3 }));
       }
     }
   }
@@ -241,8 +235,12 @@ function changesToUnifiedDiff(changes: FileChange[], proj: string): string {
   return patches.join('\n');
 }
 
-export function renderDiffView(s: SessionReport, viewStyle: 'side' | 'line' = 'line'): string {
+export function generateUnifiedDiff(s: SessionReport): string {
   const proj = (s.cwd ?? '').split('/').pop() ?? '';
+  return changesToUnifiedDiff(s.fileChanges ?? [], proj);
+}
+
+export function renderDiffView(s: SessionReport, viewStyle: 'side' | 'line' = 'line'): string {
   const changes = s.fileChanges ?? [];
 
   if (changes.length === 0) {
@@ -260,26 +258,40 @@ export function renderDiffView(s: SessionReport, viewStyle: 'side' | 'line' = 'l
     byFile.set(c.path, arr);
   }
 
-  const unifiedDiff = changesToUnifiedDiff(changes, proj);
-  const outputFormat = viewStyle === 'side' ? 'side-by-side' : 'line-by-line';
-  const diffHtml = diff2html(unifiedDiff, {
-    drawFileList: true,
-    matching: 'lines',
-    outputFormat,
-    colorScheme: ColorSchemeType.DARK,
-  });
-
   const otherStyle = viewStyle === 'side' ? 'line' : 'side';
   const otherLabel = viewStyle === 'side' ? 'Unified' : 'Side-by-Side';
+  const outputFormat = viewStyle === 'side' ? 'side-by-side' : 'line-by-line';
 
-  let html = `<div class="diff-view">
+  // Client-side rendering with Diff2HtmlUI for syntax highlighting
+  return `<div class="diff-view">
     <div class="diff-toolbar">
       <button class="diff-btn" hx-get="/partial/detail/${s.id}" hx-target="#detail" hx-swap="innerHTML">← Back</button>
       <span class="diff-summary">${changes.length} change${changes.length > 1 ? 's' : ''} across ${byFile.size} file${byFile.size > 1 ? 's' : ''}</span>
       <button class="diff-btn" hx-get="/partial/diff/${s.id}?style=${otherStyle}" hx-target="#detail" hx-swap="innerHTML">${otherLabel}</button>
     </div>
-    <div class="diff2html-wrapper">${diffHtml}</div>
+    <div id="diff-container" class="diff2html-wrapper"></div>
+    <script>
+    (function() {
+      fetch('/api/diff/${s.id}')
+        .then(r => r.json())
+        .then(data => {
+          var target = document.getElementById('diff-container');
+          var ui = new Diff2HtmlUI(target, data.diff, {
+            drawFileList: true,
+            matching: 'lines',
+            outputFormat: '${outputFormat}',
+            highlight: true,
+            colorScheme: 'dark',
+            fileListToggle: true,
+            fileContentToggle: true,
+          });
+          ui.draw();
+          ui.highlightCode();
+        })
+        .catch(function() {
+          document.getElementById('diff-container').innerHTML = '<div class="diff-more">Failed to load diff</div>';
+        });
+    })();
+    </script>
   </div>`;
-
-  return html;
 }
