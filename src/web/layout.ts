@@ -44,8 +44,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .sidebar-header{padding:10px 16px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;background:var(--bg2);z-index:2;white-space:nowrap}
 .sidebar-toggle{background:none;border:1px solid var(--border);color:var(--text2);border-radius:4px;width:24px;height:24px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .sidebar-toggle:hover{color:var(--cyan);border-color:var(--cyan)}
-.sidebar-expand{background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:4px;width:28px;height:28px;cursor:pointer;font-size:12px;position:absolute;left:8px;top:8px;z-index:10;display:flex;align-items:center;justify-content:center}
-.sidebar-expand:hover{color:var(--cyan);border-color:var(--cyan)}
+.sidebar-expand{background:var(--bg3);border:1px solid var(--border);border-left:none;color:var(--text2);border-radius:0 4px 4px 0;width:20px;height:40px;cursor:pointer;font-size:11px;position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:10;display:flex;align-items:center;justify-content:center}
+.sidebar-expand:hover{color:var(--cyan);border-color:var(--cyan);background:var(--bg4)}
 .count{background:var(--bg3);color:var(--text2);font-size:11px;padding:1px 7px;border-radius:10px;font-weight:500}
 .s-item{padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
 .s-item:last-child{border-bottom:none}
