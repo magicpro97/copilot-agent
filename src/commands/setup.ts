@@ -152,9 +152,45 @@ function cursorRules(): string {
 `;
 }
 
+// ── Hooks YAML ───────────────────────────────────────────────────
+
+function hooksYaml(): string {
+  return `# copilot-agent hooks — quality gates for AI agents
+# Automatically runs after agent events to prevent broken code.
+
+on_task_complete:
+  # Verify quality after every completed task
+  - command: "copilot-agent verify --checks test,lint,build,typecheck"
+    name: "Quality gate"
+    timeout: 180
+
+on_session_end:
+  # Final verification when session ends
+  - command: "copilot-agent verify"
+    name: "Final quality check"
+    timeout: 180
+  # Push changes if on a feature branch (not main/master)
+  # - command: "git rev-parse --abbrev-ref HEAD | grep -vE '^(main|master)$' && git push origin HEAD || true"
+  #   name: "Auto-push feature branch"
+  #   timeout: 30
+
+on_error:
+  # Stash broken changes so the repo stays clean
+  - command: "git stash push -m 'copilot-agent: stash on error' 2>/dev/null || true"
+    name: "Stash broken changes"
+    timeout: 10
+
+on_resume:
+  # Ensure clean state before agent resumes
+  - command: "copilot-agent verify --checks build,typecheck 2>/dev/null || true"
+    name: "Pre-resume build check"
+    timeout: 120
+`;
+}
+
 // ── File writing helpers ─────────────────────────────────────────
 
-type Target = 'copilot' | 'claude' | 'cursor';
+type Target = 'copilot' | 'claude' | 'cursor' | 'hooks';
 
 interface SetupFile {
   target: Target;
@@ -183,6 +219,12 @@ function getProjectFiles(dir: string): SetupFile[] {
       content: cursorRules(),
       description: 'Cursor rules',
     },
+    {
+      target: 'hooks',
+      path: join(dir, '.copilot-agent', 'hooks.yaml'),
+      content: hooksYaml(),
+      description: 'Quality gate hooks',
+    },
   ];
 }
 
@@ -200,6 +242,12 @@ function getGlobalFiles(): SetupFile[] {
       path: join(home, '.claude', 'CLAUDE.md'),
       content: claudeInstructions(),
       description: 'Global Claude instructions',
+    },
+    {
+      target: 'hooks',
+      path: join(home, '.copilot-agent', 'hooks.yaml'),
+      content: hooksYaml(),
+      description: 'Global quality gate hooks',
     },
   ];
 }
@@ -234,7 +282,7 @@ export function registerSetupCommand(program: Command): void {
     .command('setup [dir]')
     .description('Install AI agent instructions (Copilot, Claude, Cursor)')
     .option('--global', 'Install globally (~/.github, ~/.claude)')
-    .option('--target <agents>', 'Comma-separated: copilot,claude,cursor (default: all)')
+    .option('--target <agents>', 'Comma-separated: copilot,claude,cursor,hooks (default: all)')
     .option('--force', 'Overwrite existing files')
     .option('--append', 'Append to existing files instead of skipping')
     .option('--dry-run', 'Show what would be written without writing')
@@ -243,7 +291,7 @@ export function registerSetupCommand(program: Command): void {
       const targetDir = dir ?? process.cwd();
       const targets: Target[] = opts.target
         ? opts.target.split(',').map((s: string) => s.trim())
-        : ['copilot', 'claude', 'cursor'];
+        : ['copilot', 'claude', 'cursor', 'hooks'];
 
       const files = opts.global
         ? getGlobalFiles().filter(f => targets.includes(f.target))
