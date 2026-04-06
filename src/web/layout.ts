@@ -42,9 +42,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .sidebar.collapsed{width:0;border-right:none}
 .sidebar.collapsed .s-item,.sidebar.collapsed .sidebar-header span{display:none}
 .sidebar-header{padding:10px 16px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;background:var(--bg2);z-index:2;white-space:nowrap}
-.sidebar-toggle{background:none;border:1px solid var(--border);color:var(--text2);border-radius:4px;width:24px;height:24px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative;z-index:3}
+.sidebar-toggle{background:none;border:1px solid var(--border);color:var(--text2);border-radius:4px;width:24px;height:24px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .sidebar-toggle:hover{color:var(--cyan);border-color:var(--cyan)}
-.sidebar-toggle.floating{position:absolute;left:8px;top:8px;background:var(--bg2);z-index:5}
+.sidebar-expand{background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:4px;width:28px;height:28px;cursor:pointer;font-size:12px;position:absolute;left:8px;top:8px;z-index:5;display:flex;align-items:center;justify-content:center}
+.sidebar-expand:hover{color:var(--cyan);border-color:var(--cyan)}
 .count{background:var(--bg3);color:var(--text2);font-size:11px;padding:1px 7px;border-radius:10px;font-weight:500}
 .s-item{padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s}
 .s-item:last-child{border-bottom:none}
@@ -60,7 +61,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-si
 .badge-stop{background:rgba(210,153,34,.12);color:var(--yellow)}
 .badge-claude{background:rgba(217,119,6,.15);color:#f59e0b}
 .badge-copilot{background:rgba(56,189,248,.12);color:#38bdf8}
-.detail{padding:20px;overflow-y:auto}
+.detail{padding:20px;overflow-y:auto;position:relative}
 .detail-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .detail-title{font-size:18px;font-weight:700}
 .detail-id{font-family:var(--font-mono);font-size:11px;color:var(--text3);background:var(--bg);padding:3px 8px;border-radius:4px}

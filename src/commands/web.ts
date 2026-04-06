@@ -141,6 +141,7 @@ function startWebServer(port: number, autoOpen: boolean): void {
         ${renderSessionList(sessions, firstId)}
       </div>
       <div class="detail" id="detail">
+        <button class="sidebar-expand" id="sidebar-expand" title="Expand sidebar" style="display:none">▶</button>
         ${firstId ? renderDetail(sessions[0]) : '<div class="empty-detail">No sessions</div>'}
       </div>
     </div>
@@ -153,29 +154,26 @@ function startWebServer(port: number, autoOpen: boolean): void {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-GB');
 
     (function() {
-      var btn = document.getElementById('sidebar-toggle');
+      var collapseBtn = document.getElementById('sidebar-toggle');
+      var expandBtn = document.getElementById('sidebar-expand');
       var grid = document.getElementById('main-grid');
       var sb = document.getElementById('sidebar');
-      var detail = document.getElementById('detail');
-      var collapsed = false;
-      btn.addEventListener('click', function() {
-        collapsed = !collapsed;
-        if (collapsed) {
-          grid.classList.add('sidebar-collapsed');
-          sb.classList.add('collapsed');
-          btn.textContent = '▶';
-          btn.title = 'Expand sidebar';
-          btn.classList.add('floating');
-          detail.style.paddingLeft = '40px';
-        } else {
-          grid.classList.remove('sidebar-collapsed');
-          sb.classList.remove('collapsed');
-          btn.textContent = '◀';
-          btn.title = 'Collapse sidebar';
-          btn.classList.remove('floating');
-          detail.style.paddingLeft = '';
-        }
-      });
+
+      function collapse() {
+        grid.classList.add('sidebar-collapsed');
+        sb.classList.add('collapsed');
+        collapseBtn.style.display = 'none';
+        expandBtn.style.display = '';
+      }
+      function expand() {
+        grid.classList.remove('sidebar-collapsed');
+        sb.classList.remove('collapsed');
+        collapseBtn.style.display = '';
+        expandBtn.style.display = 'none';
+      }
+
+      collapseBtn.addEventListener('click', collapse);
+      expandBtn.addEventListener('click', expand);
     })();
   </script>
 </body>
