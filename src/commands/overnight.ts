@@ -51,13 +51,25 @@ interface OvernightOptions {
   agent: AgentType;
 }
 
+let overnightStartTime: number = 0;
+
 function isPastDeadline(untilHour: number): boolean {
   const hour = new Date().getHours();
-  return hour >= untilHour && hour < 20;
+  const startHour = new Date(overnightStartTime).getHours();
+
+  if (startHour < untilHour) {
+    // Same-day: started at 10, deadline 18 → past when hour >= 18
+    return hour >= untilHour;
+  } else {
+    // Overnight: started at 22, deadline 07 → past when hour >= 7 AND we've wrapped past midnight
+    // If current hour is between deadline and start, we're past deadline
+    return hour >= untilHour && hour < startHour;
+  }
 }
 
 async function overnightCommand(dir: string, opts: OvernightOptions): Promise<void> {
   assertAgent(opts.agent);
+  overnightStartTime = Date.now();
 
   const ts = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
   const logPath = join(homedir(), '.copilot', 'auto-resume-logs', `overnight-${ts}.log`);
@@ -127,6 +139,13 @@ async function overnightCommand(dir: string, opts: OvernightOptions): Promise<vo
   let totalCommits = 0;
 
   while (!isPastDeadline(opts.until) && taskIdx < tasks.length) {
+    // Safety: abort if running longer than 12 hours regardless of deadline
+    const elapsedHours = (Date.now() - overnightStartTime) / (1000 * 60 * 60);
+    if (elapsedHours > 12) {
+      warn('Safety limit: 12 hours max runtime exceeded. Stopping.');
+      break;
+    }
+
     if (totalPremium >= opts.maxPremium) {
       warn(`Premium budget exhausted: ${totalPremium}/${opts.maxPremium}`);
       break;
