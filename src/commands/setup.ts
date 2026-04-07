@@ -90,6 +90,25 @@ A change is **breaking** if it:
 
 If you detect a breaking change: **STOP and ask** for confirmation before proceeding.
 
+## ⚠️ Lessons Learned (from real incidents)
+
+These rules come from actual failures. Do NOT skip them.
+
+1. **NEVER reset/delete/discard code without reviewing it first.**
+   Even if a commit is in the wrong place (e.g. on main instead of a branch), the content may be valuable. Always \`git diff\` or \`git show\` before \`git reset\`, \`git checkout -- .\`, or \`git clean\`.
+
+2. **ALWAYS review agent output before pushing or creating PRs.**
+   AI agents make mistakes — silencing errors, removing logging, deleting user-facing feedback. Review every diff line before \`git push\`.
+
+3. **Silent exception swallowing (\`catch (_) {}\`) is a bug, not a cleanup.**
+   Never replace error logging with empty catch blocks. At minimum, log the error. If it's user-facing, show a message (snackbar, toast, alert).
+
+4. **Verify deadlines and timeouts actually work.**
+   A bug in deadline logic caused an overnight run to continue for 22 hours past its deadline. Always add safety nets (max runtime, max iterations) alongside time-based limits.
+
+5. **Check what branch you're on before committing.**
+   Commits on main/master bypass code review entirely. Run \`git branch --show-current\` before every commit.
+
 ## Quick Reference
 
 ### Quality Gate (ALWAYS run after making changes)
